@@ -164,6 +164,29 @@ class ResourceSerializer(serializers.ModelSerializer):
     related_courses = CourseSerializer(many=True, read_only=True)
     related_skills = SkillSerializer(many=True, read_only=True)
 
+    def validate(self, attrs):
+        request = self.context.get('request')
+        file_obj = attrs.get('file')
+        url = attrs.get('url', '')
+        written_content = attrs.get('written_content', '')
+
+        if self.instance is not None:
+            file_obj = file_obj or self.instance.file
+            url = url or self.instance.url
+            written_content = written_content or self.instance.written_content
+
+        if request and not file_obj:
+            file_obj = request.FILES.get('file')
+
+        has_file = bool(file_obj)
+        has_url = bool((url or '').strip())
+        has_written = bool((written_content or '').strip())
+
+        if not (has_file or has_url or has_written):
+            raise serializers.ValidationError('Provide at least one resource content: file, URL, or written_content.')
+
+        return attrs
+
     class Meta:
         model = Resource
         fields = '__all__'

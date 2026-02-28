@@ -130,6 +130,7 @@ class Resource(models.Model):
     resource_type = models.CharField(max_length=20, choices=RESOURCE_TYPES)
     url = models.URLField(blank=True, default='')
     file = models.FileField(upload_to='resources/', blank=True, null=True)
+    written_content = models.TextField(blank=True, default='')
     tags = models.TextField(blank=True, default='',
                            help_text='Comma-separated tags')
     difficulty = models.CharField(max_length=20, choices=[
@@ -155,6 +156,7 @@ class Resource(models.Model):
         parts = [
             self.title,
             self.description,
+            self.written_content,
             self.tags,
             ' '.join(c.name for c in self.related_courses.all()),
             ' '.join(s.name for s in self.related_skills.all()),

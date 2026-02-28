@@ -98,6 +98,7 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
             'total_matches': total_matches,
             'active_rooms': active_rooms,
             'recommended_resources_count': len(rec_results),
+            'uploaded_resources_count': Resource.objects.filter(uploaded_by=profile.user).count(),
             'top_matches': [
                 {'profile': StudentProfileSerializer(p).data, 'score': round(s, 3), 'reasons': r}
                 for p, s, r in match_results
@@ -114,6 +115,13 @@ class ResourceViewSet(viewsets.ModelViewSet):
     queryset = Resource.objects.all().prefetch_related('related_courses', 'related_skills')
     serializer_class = ResourceSerializer
     parser_classes = (MultiPartParser, FormParser)
+
+    def get_queryset(self):
+        queryset = Resource.objects.all().prefetch_related('related_courses', 'related_skills')
+        uploader_profile_id = self.request.query_params.get('uploader_profile_id')
+        if uploader_profile_id:
+            queryset = queryset.filter(uploaded_by__profile__id=uploader_profile_id)
+        return queryset
 
     def perform_create(self, serializer):
         # In this demo app, we might not have a logged-in user via session.
