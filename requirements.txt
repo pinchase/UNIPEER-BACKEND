@@ -1,14 +1,14 @@
- asgiref==3.11.1
- Django==6.0.2
- django-cors-headers==4.9.0
- django-environ==0.13.0
- djangorestframework==3.16.1
- joblib==1.5.3
- numpy==2.4.2
- scikit-learn==1.8.0
- scipy==1.17.0
- sqlparse==0.5.5
- threadpoolctl==3.6.0
+asgiref==3.11.1
+Django==6.0.2
+django-cors-headers==4.9.0
+django-environ==0.13.0
+djangorestframework==3.16.1
+joblib==1.5.3
+numpy==2.4.2
+scikit-learn==1.8.0
+scipy==1.17.0
+sqlparse==0.5.5
+threadpoolctl==3.6.0
 gunicorn==21.2.0
-mysqlclient==2.2.4
+PyMySQL==1.1.1
 whitenoise==6.7.0
