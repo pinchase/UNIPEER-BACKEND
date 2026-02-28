@@ -60,6 +60,23 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],  # you can add BASE_DIR / "templates" if you have custom templates
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.debug",
+                "django.template.context_processors.request",  # REQUIRED for admin
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
+    },
+]
+
 ROOT_URLCONF = "unipeer.urls"
 WSGI_APPLICATION = "unipeer.wsgi.application"
 
