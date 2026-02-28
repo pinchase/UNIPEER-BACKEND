@@ -1,5 +1,5 @@
 """
-Django settings for UniPeer project.
+Django settings for UniPeer project (Production Ready)
 """
 
 from pathlib import Path
@@ -8,107 +8,135 @@ import environ
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-env = environ.Env(
-    # set casting, default value
-    DEBUG=(bool, False)
-)
-# Reading .env file
-env_file = os.path.join(BASE_DIR, '.env')
-if os.path.exists(env_file):
+# -----------------------------
+# ENVIRONMENT
+# -----------------------------
+env = environ.Env(DEBUG=(bool, False))
+
+# Load .env locally (Render uses real env vars)
+env_file = BASE_DIR / ".env"
+if env_file.exists():
     environ.Env.read_env(env_file)
-else:
-    # Check if we are in the backend directory
-    env_file = os.path.join(BASE_DIR.parent, '.env')
-    if os.path.exists(env_file):
-        environ.Env.read_env(env_file)
 
-SECRET_KEY = env('SECRET_KEY')
+# -----------------------------
+# CORE SECURITY
+# -----------------------------
+SECRET_KEY = env("SECRET_KEY")
 
-DEBUG = env('DEBUG')
+DEBUG = env.bool("DEBUG", default=False)
 
-ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['https://unipeer-frontend.vercel.app'])
+ALLOWED_HOSTS = env.list(
+    "ALLOWED_HOSTS",
+    default=[".onrender.com", "localhost", "127.0.0.1"]
+)
 
+# -----------------------------
+# APPLICATIONS
+# -----------------------------
 INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-    'rest_framework',
-    'corsheaders',
-    'api',
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "corsheaders",
+    "rest_framework",
+    "api",
 ]
 
+# -----------------------------
+# MIDDLEWARE
+# -----------------------------
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
-    'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-ROOT_URLCONF = 'unipeer.urls'
+ROOT_URLCONF = "unipeer.urls"
+WSGI_APPLICATION = "unipeer.wsgi.application"
 
-TEMPLATES = [
-    {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.debug',
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
-            ],
-        },
-    },
-]
-
-WSGI_APPLICATION = 'unipeer.wsgi.application'
-
+# -----------------------------
+# DATABASE
+# -----------------------------
 DATABASES = {
-    'default': env.db_url('DB_URL', default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}")
+    "default": env.db("DB_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}")
 }
 
-AUTH_PASSWORD_VALIDATORS = []
+# Aiven requires SSL
+if "aivencloud.com" in DATABASES["default"]["HOST"]:
+    DATABASES["default"]["OPTIONS"] = {
+        "ssl": {
+            "ca": BASE_DIR / "ca.pem",
+        }
+    }
 
-LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+# -----------------------------
+# PASSWORD VALIDATION
+# -----------------------------
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
+# -----------------------------
+# INTERNATIONALIZATION
+# -----------------------------
+LANGUAGE_CODE = "en-us"
+TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-# Static files (CSS, JavaScript, Images)
-STATIC_URL = 'static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+# -----------------------------
+# STATIC FILES
+# -----------------------------
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
-# Media files (Uploads)
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+# -----------------------------
+# MEDIA FILES
+# -----------------------------
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 
-# Default primary key field type
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-
-# CORS — set CORS_ALLOWED_ORIGINS env var to your frontend URL(s), comma-separated
-# Example: CORS_ALLOWED_ORIGINS=https://your-frontend.vercel.app
-_cors_origins = env('CORS_ALLOWED_ORIGINS', default='').split(',')
-CORS_ALLOWED_ORIGINS = [
-    "https://unipeer-frontend.vercel.app/",  # your actual frontend URL
-]
-if not CORS_ALLOWED_ORIGINS:
-    CORS_ALLOW_ALL_ORIGINS = True  # fallback for local dev only
-
-# REST Framework
+# -----------------------------
+# DJANGO REST FRAMEWORK
+# -----------------------------
 REST_FRAMEWORK = {
-    'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.AllowAny"
     ],
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 20,
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 20,
 }
+
+# -----------------------------
+# CORS
+# -----------------------------
+CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
+
+if DEBUG and not CORS_ALLOWED_ORIGINS:
+    CORS_ALLOW_ALL_ORIGINS = True
+
+# -----------------------------
+# SECURITY (Production Hardened)
+# -----------------------------
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_SSL_REDIRECT = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
