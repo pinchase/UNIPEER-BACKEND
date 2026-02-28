@@ -46,11 +46,13 @@ class StudentProfileSerializer(serializers.ModelSerializer):
         queryset=Course.objects.all(), many=True, write_only=True, source='courses', required=False
     )
     full_name = serializers.SerializerMethodField()
+    display_name = serializers.SerializerMethodField()
+    name = serializers.SerializerMethodField()
 
     class Meta:
         model = StudentProfile
         fields = [
-            'id', 'user', 'full_name', 'bio', 'avatar_url',
+            'id', 'user', 'full_name', 'display_name', 'name', 'bio', 'avatar_url',
             'university', 'department', 'year_of_study', 'gpa',
             'interests', 'learning_goals', 'collaboration_preference',
             'skills', 'courses', 'skill_ids', 'course_ids',
@@ -60,6 +62,12 @@ class StudentProfileSerializer(serializers.ModelSerializer):
         ]
 
     def get_full_name(self, obj):
+        return obj.user.get_full_name() or obj.user.username
+
+    def get_display_name(self, obj):
+        return obj.user.get_full_name() or obj.user.username
+
+    def get_name(self, obj):
         return obj.user.get_full_name() or obj.user.username
 
 
