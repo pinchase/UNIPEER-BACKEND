@@ -3,10 +3,11 @@ UniPeer API Views — Endpoints for profiles, matching, resources, and collabora
 """
 
 from rest_framework import viewsets, status, generics
-from rest_framework.decorators import api_view, action
+from rest_framework.decorators import api_view, action, permission_classes
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
@@ -22,6 +23,10 @@ from .serializers import (
     MatchSerializer, MatchResultSerializer,
     ResourceRecommendationSerializer, CollaborationRoomSerializer,
     MessageSerializer, DashboardSerializer, NotificationSerializer
+)
+from .permissions import (
+    IsOwnerOrReadOnly, IsProfileOwner, IsRoomMember,
+    IsNotificationRecipient, IsMatchParticipant
 )
 from .ml_engine import StudentMatcher, ResourceRecommender
 
@@ -263,6 +268,7 @@ class CollaborationRoomViewSet(viewsets.ModelViewSet):
 
 class RegisterView(APIView):
     """Register a new student and create their profile."""
+    permission_classes = [AllowAny]  # Public endpoint - anyone can register
 
     def post(self, request):
         serializer = StudentProfileCreateSerializer(data=request.data)
