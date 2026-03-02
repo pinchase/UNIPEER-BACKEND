@@ -5,6 +5,7 @@ Django settings for UniPeer project (Production Ready)
 from pathlib import Path
 import os
 import environ
+from datetime import timedelta
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -40,7 +41,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "corsheaders",
+    "corsheaders",  # ✅ required for CORS
     "rest_framework",
     "api",
 ]
@@ -49,9 +50,9 @@ INSTALLED_APPS = [
 # MIDDLEWARE
 # -----------------------------
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",  # ✅ must be at top
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
-    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -60,16 +61,18 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-
+# -----------------------------
+# TEMPLATES
+# -----------------------------
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],  # you can add BASE_DIR / "templates" if you have custom templates
+        "DIRS": [],  # add BASE_DIR / "templates" if needed
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
                 "django.template.context_processors.debug",
-                "django.template.context_processors.request",  # REQUIRED for admin
+                "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
             ],
@@ -83,42 +86,23 @@ WSGI_APPLICATION = "unipeer.wsgi.application"
 # -----------------------------
 # DATABASE
 # -----------------------------
-# Default to SQLite during build/development
-# Use DATABASE_URL in production for PostgreSQL/MySQL
 DATABASE_URL = env("DATABASE_URL", default=None)
 
 if DATABASE_URL:
-    # Production: Use configured database (PostgreSQL, MySQL, etc.)
     DATABASES = {
         "default": env.db("DATABASE_URL")
     }
+    # ✅ Render PostgreSQL SSL
+    if DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql":
+        DATABASES["default"]["OPTIONS"] = {"sslmode": "require"}
 
-    # Handle Aiven MySQL/PostgreSQL SSL requirements
-    if DATABASES["default"].get("HOST") and "aivencloud.com" in DATABASES["default"]["HOST"]:
-        DATABASES["default"]["OPTIONS"] = {
-            "ssl": {
-                "ca": BASE_DIR / "ca.pem",
-            }
-        }
 else:
-    # Development/Build: Use SQLite (no external DB needed)
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": BASE_DIR / "db.sqlite3",
         }
     }
-
-# Prevent Django from checking database during import
-# This allows build.sh to run without database connection
-import sys
-if 'migrate' not in sys.argv and 'collectstatic' not in sys.argv:
-    # Normal app startup
-    pass
-else:
-    # During migrate/collectstatic, we can safely access DB
-    pass
-
 
 # -----------------------------
 # PASSWORD VALIDATION
@@ -146,6 +130,11 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
+# ✅ Optional static files dirs
+STATICFILES_DIRS = [
+    BASE_DIR / "static",
+]
+
 # -----------------------------
 # MEDIA FILES
 # -----------------------------
@@ -158,25 +147,24 @@ MEDIA_ROOT = BASE_DIR / "media"
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework_simplejwt.authentication.JWTAuthentication",
-        "rest_framework.authentication.SessionAuthentication",  # For browsable API
+        "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
-        "rest_framework.permissions.IsAuthenticated"  # Require authentication by default
+        "rest_framework.permissions.IsAuthenticated"
     ],
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "100/hour",  # Anonymous users: 100 requests per hour
-        "user": "1000/hour",  # Authenticated users: 1000 requests per hour
+        "anon": "100/hour",
+        "user": "1000/hour",
     },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
 }
 
 # JWT Settings
-from datetime import timedelta
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
@@ -192,59 +180,48 @@ SIMPLE_JWT = {
 }
 
 # -----------------------------
-# CORS
-# Dynamic support for Vercel preview deployments
-# Allows main production domain + all Vercel preview domains
+# CORS CONFIGURATION
 # -----------------------------
-
 def get_allowed_origins():
-    """
-    Generate CORS allowed origins dynamically.
-    Includes:
-    - Production domain
-    - All Vercel preview deployments (*.vercel.app pattern)
-    - Development domains
-    """
     origins = [
-        "https://unipeer-frontend.vercel.app",  # Production
-        "http://localhost:3000",  # Local development
-        "http://127.0.0.1:3000",  # Local development alternative
+        "https://unipeer-frontend.vercel.app",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
     ]
     return origins
 
 CORS_ALLOWED_ORIGINS = get_allowed_origins()
 
-# Allow any subdomain of vercel.app (catches all preview deployments)
 CORS_ALLOWED_ORIGIN_REGEXES = [
-    r"^https://.*\.vercel\.app$",  # All Vercel deployments
-    r"^http://localhost:\d+$",  # Local development on any port
-    r"^http://127\.0\.0\.1:\d+$",  # Local development on any port
+    r"^https://.*\.vercel\.app$",
+    r"^http://localhost:\d+$",
+    r"^http://127\.0\.0\.1:\d+$",
 ]
+
+# ✅ Credentials only needed for session cookies
+CORS_ALLOW_CREDENTIALS = False
 
 # -----------------------------
 # SECURITY (Production Hardened)
 # -----------------------------
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-SECURE_SSL_REDIRECT = not DEBUG  # Force HTTPS in production
-SESSION_COOKIE_SECURE = not DEBUG  # Send cookies only over HTTPS
-CSRF_COOKIE_SECURE = not DEBUG  # CSRF cookies only over HTTPS
-SECURE_BROWSER_XSS_FILTER = True  # Enable XSS protection
-SECURE_CONTENT_TYPE_NOSNIFF = True  # Prevent MIME type sniffing
+SECURE_SSL_REDIRECT = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
 
-# Additional security headers (only in production)
 if not DEBUG:
-    SECURE_HSTS_SECONDS = 31536000  # 1 year HSTS
+    SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
-    X_FRAME_OPTIONS = 'DENY'  # Prevent clickjacking
+    X_FRAME_OPTIONS = 'DENY'
 
-# Session security
-SESSION_COOKIE_HTTPONLY = True  # Prevent JavaScript access to session cookie
-SESSION_COOKIE_SAMESITE = 'Lax'  # CSRF protection
-CSRF_COOKIE_HTTPONLY = True  # Prevent JavaScript access to CSRF token
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SAMESITE = 'Lax'
 
-# Trusted origins for CSRF (add your frontend domains)
 CSRF_TRUSTED_ORIGINS = [
     "https://unipeer-frontend.vercel.app",
     "https://*.vercel.app",
@@ -256,4 +233,7 @@ if DEBUG:
         "http://127.0.0.1:3000",
     ])
 
+# -----------------------------
+# DEFAULT AUTO FIELD
+# -----------------------------
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
