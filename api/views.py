@@ -277,6 +277,7 @@ class RegisterView(APIView):
 
 class LoginView(APIView):
     """Authenticate a student via email and password."""
+    permission_classes = [AllowAny]  # Public endpoint - anyone can login
 
     def post(self, request):
         email = request.data.get('email')
@@ -298,8 +299,9 @@ class LoginView(APIView):
 # ─── Stats ─────────────────────────────────────────────
 
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def platform_stats(request):
-    """General platform statistics."""
+    """General platform statistics - public endpoint."""
     return Response({
         'total_students': StudentProfile.objects.count(),
         'total_resources': Resource.objects.count(),
