@@ -12,6 +12,9 @@ from django.contrib.auth import authenticate, login
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
 from django.db import models
+from django.utils import timezone
+from django.views.decorators.cache import cache_page
+from django.utils.decorators import method_decorator
 
 from .models import (
     Skill, Course, StudentProfile, Resource,
@@ -44,8 +47,29 @@ class CourseViewSet(viewsets.ModelViewSet):
 
 
 class StudentProfileViewSet(viewsets.ModelViewSet):
-    queryset = StudentProfile.objects.all().select_related('user').prefetch_related('skills', 'courses')
+    queryset = StudentProfile.objects.all().select_related('user').prefetch_related('skills', 'courses', 'badges')
     serializer_class = StudentProfileSerializer
+    permission_classes = [IsAuthenticated]  # Require authentication
+
+    def get_permissions(self):
+        """
+        Allow authenticated users to list/view profiles (for matching).
+        Only allow owners to update/delete their own profile.
+        """
+        if self.action in ['update', 'partial_update', 'destroy']:
+            return [IsAuthenticated(), IsProfileOwner()]
+        return [IsAuthenticated()]
+
+    def get_queryset(self):
+        """Optimize queries to reduce database hits."""
+        return StudentProfile.objects.select_related(
+            'user'
+        ).prefetch_related(
+            'skills',
+            'courses',
+            'badges',
+            'rooms'
+        ).all()
 
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
     def me(self, request):
@@ -343,12 +367,13 @@ class LoginView(APIView):
             return Response({'error': 'User profile not found'}, status=404)
 
 
-# ─── Stats ─────────────────────────────────────────────
+# ─── Stats & Utilities ────────────────────────────────
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
+@cache_page(60 * 5)  # Cache for 5 minutes
 def platform_stats(request):
-    """General platform statistics - public endpoint."""
+    """General platform statistics - public endpoint. Cached for 5 minutes."""
     return Response({
         'total_students': StudentProfile.objects.count(),
         'total_resources': Resource.objects.count(),
@@ -357,3 +382,48 @@ def platform_stats(request):
         'total_matches': Match.objects.count(),
         'active_rooms': CollaborationRoom.objects.filter(is_active=True).count(),
     })
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def keep_alive(request):
+    """
+    Lightweight endpoint for keep-alive pings to prevent Render spin-down.
+    Set up a cron job (UptimeRobot, etc.) to ping this every 14 minutes.
+    """
+    return Response({
+        'status': 'alive',
+        'timestamp': timezone.now().isoformat()
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def whoami(request):
+    """
+    Get current user's basic info for dashboard welcome message.
+    Returns: {id, username, first_name, last_name, full_name, email, profile_id}
+    """
+    try:
+        profile = StudentProfile.objects.select_related('user').get(user=request.user)
+        return Response({
+            'id': request.user.id,
+            'username': request.user.username,
+            'first_name': request.user.first_name,
+            'last_name': request.user.last_name,
+            'full_name': request.user.get_full_name() or request.user.username,
+            'email': request.user.email,
+            'profile_id': profile.id,
+        })
+    except StudentProfile.DoesNotExist:
+        return Response({
+            'id': request.user.id,
+            'username': request.user.username,
+            'first_name': request.user.first_name,
+            'last_name': request.user.last_name,
+            'full_name': request.user.get_full_name() or request.user.username,
+            'email': request.user.email,
+            'profile_id': None,
+        })
+
+

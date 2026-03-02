@@ -22,4 +22,6 @@ urlpatterns = [
     path('login/', views.LoginView.as_view(), name='login'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('stats/', views.platform_stats, name='platform-stats'),
+    path('keep-alive/', views.keep_alive, name='keep-alive'),
+    path('whoami/', views.whoami, name='whoami'),
 ]
