@@ -47,6 +47,18 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
     queryset = StudentProfile.objects.all().select_related('user').prefetch_related('skills', 'courses')
     serializer_class = StudentProfileSerializer
 
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
+    def me(self, request):
+        """Get the current authenticated user's profile."""
+        try:
+            profile = StudentProfile.objects.select_related('user').prefetch_related('skills', 'courses', 'badges').get(user=request.user)
+            return Response(StudentProfileSerializer(profile).data)
+        except StudentProfile.DoesNotExist:
+            return Response(
+                {'error': 'Profile not found for current user'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
     @action(detail=True, methods=['get'])
     def matches(self, request, pk=None):
         """Get ML-computed matches for a specific student."""
@@ -271,11 +283,21 @@ class RegisterView(APIView):
     permission_classes = [AllowAny]  # Public endpoint - anyone can register
 
     def post(self, request):
+        from rest_framework_simplejwt.tokens import RefreshToken
+
         serializer = StudentProfileCreateSerializer(data=request.data)
         if serializer.is_valid():
             profile = serializer.save()
+
+            # Generate JWT tokens for the new user
+            refresh = RefreshToken.for_user(profile.user)
+
             return Response(
-                StudentProfileSerializer(profile).data,
+                {
+                    'access': str(refresh.access_token),
+                    'refresh': str(refresh),
+                    'user': StudentProfileSerializer(profile).data
+                },
                 status=status.HTTP_201_CREATED
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -286,6 +308,8 @@ class LoginView(APIView):
     permission_classes = [AllowAny]  # Public endpoint - anyone can login
 
     def post(self, request):
+        from rest_framework_simplejwt.tokens import RefreshToken
+
         email = request.data.get('email')
         password = request.data.get('password')
 
@@ -294,12 +318,29 @@ class LoginView(APIView):
 
         try:
             user = User.objects.get(email=email)
-            user = authenticate(username=user.username, password=password)
-            if user:
-                return Response(StudentProfileSerializer(user.profile).data)
+            authenticated_user = authenticate(username=user.username, password=password)
+
+            if authenticated_user:
+                # Generate JWT tokens
+                refresh = RefreshToken.for_user(authenticated_user)
+
+                # Get user profile
+                profile = StudentProfile.objects.select_related('user').prefetch_related(
+                    'skills', 'courses', 'badges'
+                ).get(user=authenticated_user)
+
+                return Response({
+                    'access': str(refresh.access_token),
+                    'refresh': str(refresh),
+                    'user': StudentProfileSerializer(profile).data
+                })
+
             return Response({'error': 'Invalid credentials'}, status=401)
         except User.DoesNotExist:
             return Response({'error': 'User not found'}, status=404)
+        except StudentProfile.DoesNotExist:
+            # User exists but no profile - should not happen, but handle it
+            return Response({'error': 'User profile not found'}, status=404)
 
 
 # ─── Stats ─────────────────────────────────────────────
