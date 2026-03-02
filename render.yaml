@@ -1,0 +1,41 @@
+# Render.com Blueprint Configuration
+# This file configures your backend service for automatic deployment
+
+services:
+  - type: web
+    name: unipeer-backend
+    env: python
+    region: oregon # Change to your preferred region
+    plan: free # or 'starter' for production
+    branch: main
+    buildCommand: "./build.sh"
+    startCommand: "./start.sh"
+    healthCheckPath: /api/stats/
+    
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      
+      - key: SECRET_KEY
+        generateValue: true
+        
+      - key: DEBUG
+        value: False
+        
+      - key: ALLOWED_HOSTS
+        value: .onrender.com
+        
+      - key: DATABASE_URL
+        fromDatabase:
+          name: unipeer-db
+          property: connectionString
+    
+    # Automatically create a PostgreSQL database
+    databases:
+      - name: unipeer-db
+        databaseName: unipeer
+        user: unipeer_user
+        plan: free # or 'starter' for production
+
+# For manual deployment without render.yaml, see RENDER_DEPLOYMENT_GUIDE.md
+

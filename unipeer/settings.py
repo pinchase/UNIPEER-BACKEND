@@ -83,12 +83,13 @@ WSGI_APPLICATION = "unipeer.wsgi.application"
 # -----------------------------
 # DATABASE
 # -----------------------------
+# Use SQLite as default for development/build, PostgreSQL/MySQL for production
 DATABASES = {
-    "default": env.db("DB_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}")
+    "default": env.db("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}")
 }
 
-# Aiven requires SSL
-if "aivencloud.com" in DATABASES["default"]["HOST"]:
+# Aiven MySQL/PostgreSQL requires SSL - but only if HOST key exists (not for SQLite)
+if DATABASES["default"].get("HOST") and "aivencloud.com" in DATABASES["default"]["HOST"]:
     DATABASES["default"]["OPTIONS"] = {
         "ssl": {
             "ca": BASE_DIR / "ca.pem",
@@ -212,7 +213,7 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
     X_FRAME_OPTIONS = 'DENY'  # Prevent clickjacking
-    
+
 # Session security
 SESSION_COOKIE_HTTPONLY = True  # Prevent JavaScript access to session cookie
 SESSION_COOKIE_SAMESITE = 'Lax'  # CSRF protection
