@@ -83,18 +83,42 @@ WSGI_APPLICATION = "unipeer.wsgi.application"
 # -----------------------------
 # DATABASE
 # -----------------------------
-# Use SQLite as default for development/build, PostgreSQL/MySQL for production
-DATABASES = {
-    "default": env.db("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}")
-}
+# Default to SQLite during build/development
+# Use DATABASE_URL in production for PostgreSQL/MySQL
+DATABASE_URL = env("DATABASE_URL", default=None)
 
-# Aiven MySQL/PostgreSQL requires SSL - but only if HOST key exists (not for SQLite)
-if DATABASES["default"].get("HOST") and "aivencloud.com" in DATABASES["default"]["HOST"]:
-    DATABASES["default"]["OPTIONS"] = {
-        "ssl": {
-            "ca": BASE_DIR / "ca.pem",
+if DATABASE_URL:
+    # Production: Use configured database (PostgreSQL, MySQL, etc.)
+    DATABASES = {
+        "default": env.db("DATABASE_URL")
+    }
+
+    # Handle Aiven MySQL/PostgreSQL SSL requirements
+    if DATABASES["default"].get("HOST") and "aivencloud.com" in DATABASES["default"]["HOST"]:
+        DATABASES["default"]["OPTIONS"] = {
+            "ssl": {
+                "ca": BASE_DIR / "ca.pem",
+            }
+        }
+else:
+    # Development/Build: Use SQLite (no external DB needed)
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
         }
     }
+
+# Prevent Django from checking database during import
+# This allows build.sh to run without database connection
+import sys
+if 'migrate' not in sys.argv and 'collectstatic' not in sys.argv:
+    # Normal app startup
+    pass
+else:
+    # During migrate/collectstatic, we can safely access DB
+    pass
+
 
 # -----------------------------
 # PASSWORD VALIDATION

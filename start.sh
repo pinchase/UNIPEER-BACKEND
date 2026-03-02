@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Startup script for Render.com - runs migrations and starts server
 
+echo "📊 Collecting static files..."
+python manage.py collectstatic --no-input
+
 echo "🔄 Running database migrations..."
 python manage.py migrate --no-input
 
