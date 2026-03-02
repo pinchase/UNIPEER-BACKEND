@@ -19,9 +19,7 @@ env_file = BASE_DIR / ".env"
 if env_file.exists():
     environ.Env.read_env(env_file)
 
-# -----------------------------
-# CORE SECURITY
-# -----------------------------
+
 SECRET_KEY = env("SECRET_KEY")
 
 DEBUG = env.bool("DEBUG", default=False)
@@ -46,9 +44,7 @@ INSTALLED_APPS = [
     "api",
 ]
 
-# -----------------------------
-# MIDDLEWARE
-# -----------------------------
+
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",  # ✅ must be at top
     "django.middleware.security.SecurityMiddleware",
@@ -114,9 +110,7 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-# -----------------------------
-# INTERNATIONALIZATION
-# -----------------------------
+
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
