@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "corsheaders",  # ✅ required for CORS
     "rest_framework",
+    "drf_spectacular",
     "api",
 ]
 
@@ -158,6 +159,14 @@ REST_FRAMEWORK = {
     },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "UniPeer API",
+    "DESCRIPTION": "API documentation for UniPeer backend",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
 }
 
 # JWT Settings
