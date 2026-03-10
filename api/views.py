@@ -3,18 +3,14 @@ UniPeer API Views — Endpoints for profiles, matching, resources, and collabora
 """
 
 from rest_framework import viewsets, status, generics
-from rest_framework.decorators import api_view, action, permission_classes
+from rest_framework.decorators import api_view, action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
 from django.db import models
-from django.utils import timezone
-from django.views.decorators.cache import cache_page
-from django.utils.decorators import method_decorator
 
 from .models import (
     Skill, Course, StudentProfile, Resource,
@@ -26,10 +22,6 @@ from .serializers import (
     MatchSerializer, MatchResultSerializer,
     ResourceRecommendationSerializer, CollaborationRoomSerializer,
     MessageSerializer, DashboardSerializer, NotificationSerializer
-)
-from .permissions import (
-    IsOwnerOrReadOnly, IsProfileOwner, IsRoomMember,
-    IsNotificationRecipient, IsMatchParticipant
 )
 from .ml_engine import StudentMatcher, ResourceRecommender
 
@@ -47,41 +39,8 @@ class CourseViewSet(viewsets.ModelViewSet):
 
 
 class StudentProfileViewSet(viewsets.ModelViewSet):
-    queryset = StudentProfile.objects.all().select_related('user').prefetch_related('skills', 'courses', 'badges')
+    queryset = StudentProfile.objects.all().select_related('user').prefetch_related('skills', 'courses')
     serializer_class = StudentProfileSerializer
-    permission_classes = [IsAuthenticated]  # Require authentication
-
-    def get_permissions(self):
-        """
-        Allow authenticated users to list/view profiles (for matching).
-        Only allow owners to update/delete their own profile.
-        """
-        if self.action in ['update', 'partial_update', 'destroy']:
-            return [IsAuthenticated(), IsProfileOwner()]
-        return [IsAuthenticated()]
-
-    def get_queryset(self):
-        """Optimize queries to reduce database hits."""
-        return StudentProfile.objects.select_related(
-            'user'
-        ).prefetch_related(
-            'skills',
-            'courses',
-            'badges',
-            'rooms'
-        ).all()
-
-    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
-    def me(self, request):
-        """Get the current authenticated user's profile."""
-        try:
-            profile = StudentProfile.objects.select_related('user').prefetch_related('skills', 'courses', 'badges').get(user=request.user)
-            return Response(StudentProfileSerializer(profile).data)
-        except StudentProfile.DoesNotExist:
-            return Response(
-                {'error': 'Profile not found for current user'},
-                status=status.HTTP_404_NOT_FOUND
-            )
 
     @action(detail=True, methods=['get'])
     def matches(self, request, pk=None):
@@ -304,24 +263,13 @@ class CollaborationRoomViewSet(viewsets.ModelViewSet):
 
 class RegisterView(APIView):
     """Register a new student and create their profile."""
-    permission_classes = [AllowAny]  # Public endpoint - anyone can register
 
     def post(self, request):
-        from rest_framework_simplejwt.tokens import RefreshToken
-
         serializer = StudentProfileCreateSerializer(data=request.data)
         if serializer.is_valid():
             profile = serializer.save()
-
-            # Generate JWT tokens for the new user
-            refresh = RefreshToken.for_user(profile.user)
-
             return Response(
-                {
-                    'access': str(refresh.access_token),
-                    'refresh': str(refresh),
-                    'user': StudentProfileSerializer(profile).data
-                },
+                StudentProfileSerializer(profile).data,
                 status=status.HTTP_201_CREATED
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -329,11 +277,8 @@ class RegisterView(APIView):
 
 class LoginView(APIView):
     """Authenticate a student via email and password."""
-    permission_classes = [AllowAny]  # Public endpoint - anyone can login
 
     def post(self, request):
-        from rest_framework_simplejwt.tokens import RefreshToken
-
         email = request.data.get('email')
         password = request.data.get('password')
 
@@ -342,38 +287,20 @@ class LoginView(APIView):
 
         try:
             user = User.objects.get(email=email)
-            authenticated_user = authenticate(username=user.username, password=password)
-
-            if authenticated_user:
-                # Generate JWT tokens
-                refresh = RefreshToken.for_user(authenticated_user)
-
-                # Get user profile
-                profile = StudentProfile.objects.select_related('user').prefetch_related(
-                    'skills', 'courses', 'badges'
-                ).get(user=authenticated_user)
-
-                return Response({
-                    'access': str(refresh.access_token),
-                    'refresh': str(refresh),
-                    'user': StudentProfileSerializer(profile).data
-                })
-
+            user = authenticate(username=user.username, password=password)
+            if user:
+                return Response(StudentProfileSerializer(user.profile).data)
             return Response({'error': 'Invalid credentials'}, status=401)
         except User.DoesNotExist:
             return Response({'error': 'User not found'}, status=404)
-        except StudentProfile.DoesNotExist:
-            # User exists but no profile - should not happen, but handle it
-            return Response({'error': 'User profile not found'}, status=404)
 
 
-# ─── Stats & Utilities ────────────────────────────────
+# ─── Stats ─────────────────────────────────────────────
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
-@cache_page(60 * 5)  # Cache for 5 minutes
 def platform_stats(request):
-    """General platform statistics - public endpoint. Cached for 5 minutes."""
+    """General platform statistics - public endpoint."""
     return Response({
         'total_students': StudentProfile.objects.count(),
         'total_resources': Resource.objects.count(),
@@ -382,48 +309,3 @@ def platform_stats(request):
         'total_matches': Match.objects.count(),
         'active_rooms': CollaborationRoom.objects.filter(is_active=True).count(),
     })
-
-
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def keep_alive(request):
-    """
-    Lightweight endpoint for keep-alive pings to prevent Render spin-down.
-    Set up a cron job (UptimeRobot, etc.) to ping this every 14 minutes.
-    """
-    return Response({
-        'status': 'alive',
-        'timestamp': timezone.now().isoformat()
-    })
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def whoami(request):
-    """
-    Get current user's basic info for dashboard welcome message.
-    Returns: {id, username, first_name, last_name, full_name, email, profile_id}
-    """
-    try:
-        profile = StudentProfile.objects.select_related('user').get(user=request.user)
-        return Response({
-            'id': request.user.id,
-            'username': request.user.username,
-            'first_name': request.user.first_name,
-            'last_name': request.user.last_name,
-            'full_name': request.user.get_full_name() or request.user.username,
-            'email': request.user.email,
-            'profile_id': profile.id,
-        })
-    except StudentProfile.DoesNotExist:
-        return Response({
-            'id': request.user.id,
-            'username': request.user.username,
-            'first_name': request.user.first_name,
-            'last_name': request.user.last_name,
-            'full_name': request.user.get_full_name() or request.user.username,
-            'email': request.user.email,
-            'profile_id': None,
-        })
-
-
