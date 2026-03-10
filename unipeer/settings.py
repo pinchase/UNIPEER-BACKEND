@@ -125,9 +125,8 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # ✅ Optional static files dirs
-STATICFILES_DIRS = [
-    BASE_DIR / "static",
-]
+_optional_static_dir = BASE_DIR / "static"
+STATICFILES_DIRS = [_optional_static_dir] if _optional_static_dir.exists() else []
 
 # -----------------------------
 # MEDIA FILES
@@ -153,6 +152,9 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "anon": "100/hour",
         "user": "1000/hour",
+        "notifications_anon": "120/hour",
+        "notifications_user": "1200/hour",
+        "notifications_burst": "20/minute",
     },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
@@ -181,6 +183,13 @@ def get_allowed_origins():
         "https://unipeer-frontend.vercel.app",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+        "http://0.0.0.0:5500",
     ]
     return origins
 
@@ -190,6 +199,10 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://.*\.vercel\.app$",
     r"^http://localhost:\d+$",
     r"^http://127\.0\.0\.1:\d+$",
+    r"^http://0\.0\.0\.0:\d+$",
+    r"^https://localhost:\d+$",
+    r"^https://127\.0\.0\.1:\d+$",
+    r"^https://0\.0\.0\.0:\d+$",
 ]
 
 # ✅ Credentials only needed for session cookies
@@ -225,6 +238,7 @@ if DEBUG:
     CSRF_TRUSTED_ORIGINS.extend([
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://0.0.0.0:5500",
     ])
 
 # -----------------------------

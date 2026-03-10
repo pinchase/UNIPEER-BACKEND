@@ -4,6 +4,8 @@ UniPeer API Views — Endpoints for profiles, matching, resources, and collabora
 
 from rest_framework import viewsets, status, generics
 from rest_framework.decorators import api_view, action
+from rest_framework.decorators import permission_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.views import APIView
@@ -24,6 +26,7 @@ from .serializers import (
     MessageSerializer, DashboardSerializer, NotificationSerializer
 )
 from .ml_engine import StudentMatcher, ResourceRecommender
+from .throttles import NotificationAnonThrottle, NotificationBurstThrottle, NotificationUserThrottle
 
 
 # ─── Viewsets ──────────────────────────────────────────
@@ -41,6 +44,7 @@ class CourseViewSet(viewsets.ModelViewSet):
 class StudentProfileViewSet(viewsets.ModelViewSet):
     queryset = StudentProfile.objects.all().select_related('user').prefetch_related('skills', 'courses')
     serializer_class = StudentProfileSerializer
+    permission_classes = [AllowAny]
 
     @action(detail=True, methods=['get'])
     def matches(self, request, pk=None):
@@ -133,7 +137,7 @@ class ResourceViewSet(viewsets.ModelViewSet):
             try:
                 profile = StudentProfile.objects.get(id=uploader_profile_id)
                 user = profile.user
-            except StudentProfile.DoesNotExist:
+            except (StudentProfile.DoesNotExist, ValueError, TypeError):
                 pass
                 
         # If we found a valid user, assign it
@@ -144,24 +148,29 @@ class ResourceViewSet(viewsets.ModelViewSet):
 
 
 class NotificationViewSet(viewsets.ModelViewSet):
-    queryset = Notification.objects.all()
+    queryset = Notification.objects.all().select_related('recipient', 'recipient__user')
     serializer_class = NotificationSerializer
+    permission_classes = [AllowAny]
+    throttle_classes = [NotificationBurstThrottle, NotificationUserThrottle, NotificationAnonThrottle]
 
     def get_queryset(self):
-        # In a real app with auth, filter by logged-in user:
-        # return Notification.objects.filter(recipient__user=self.request.user)
-        # For demo, we filter by 'recipient_id' query param if provided
-        queryset = Notification.objects.all()
+        queryset = Notification.objects.all().select_related('recipient', 'recipient__user')
         recipient_id = self.request.query_params.get('recipient_id')
-        if recipient_id:
-            queryset = queryset.filter(recipient_id=recipient_id)
-        return queryset
+        if not recipient_id:
+            return queryset.none()
+
+        try:
+            recipient_id = int(recipient_id)
+        except (TypeError, ValueError):
+            return queryset.none()
+
+        return queryset.filter(recipient_id=recipient_id)
 
     @action(detail=True, methods=['post'])
     def mark_read(self, request, pk=None):
         notification = self.get_object()
         notification.is_read = True
-        notification.save()
+        notification.save(update_fields=['is_read'])
         return Response({'status': 'marked as read'})
 
 
@@ -187,8 +196,17 @@ class MatchViewSet(viewsets.ModelViewSet):
         if not student_a_id or not student_b_id:
             return Response({'error': 'Both students are required'}, status=400)
 
+        try:
+            student_a_id = int(student_a_id)
+            student_b_id = int(student_b_id)
+        except (TypeError, ValueError):
+            return Response({'error': 'student_a and student_b must be valid IDs'}, status=400)
+
+        if student_a_id == student_b_id:
+            return Response({'error': 'A student cannot be matched with themselves'}, status=400)
+
         # Ensure order to prevent duplicates (student_a < student_b)
-        id_a, id_b = sorted([int(student_a_id), int(student_b_id)])
+        id_a, id_b = sorted([student_a_id, student_b_id])
         
         student_a = get_object_or_404(StudentProfile, id=id_a)
         student_b = get_object_or_404(StudentProfile, id=id_b)
@@ -254,6 +272,11 @@ class CollaborationRoomViewSet(viewsets.ModelViewSet):
         if not profile_id or not content:
             return Response({'error': 'sender_id and content required'}, status=400)
 
+        try:
+            profile_id = int(profile_id)
+        except (TypeError, ValueError):
+            return Response({'error': 'sender_id must be a valid ID'}, status=400)
+
         profile = get_object_or_404(StudentProfile, id=profile_id)
         msg = Message.objects.create(room=room, sender=profile, content=content)
         return Response(MessageSerializer(msg).data, status=201)
@@ -263,6 +286,7 @@ class CollaborationRoomViewSet(viewsets.ModelViewSet):
 
 class RegisterView(APIView):
     """Register a new student and create their profile."""
+    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = StudentProfileCreateSerializer(data=request.data)
@@ -277,6 +301,7 @@ class RegisterView(APIView):
 
 class LoginView(APIView):
     """Authenticate a student via email and password."""
+    permission_classes = [AllowAny]
 
     def post(self, request):
         email = request.data.get('email')
@@ -285,14 +310,14 @@ class LoginView(APIView):
         if not email or not password:
             return Response({'error': 'Email and password required'}, status=400)
 
-        try:
-            user = User.objects.get(email=email)
-            user = authenticate(username=user.username, password=password)
-            if user:
-                return Response(StudentProfileSerializer(user.profile).data)
-            return Response({'error': 'Invalid credentials'}, status=401)
-        except User.DoesNotExist:
+        user = User.objects.filter(email=email).order_by('id').first()
+        if not user:
             return Response({'error': 'User not found'}, status=404)
+
+        user = authenticate(username=user.username, password=password)
+        if user:
+            return Response(StudentProfileSerializer(user.profile).data)
+        return Response({'error': 'Invalid credentials'}, status=401)
 
 
 # ─── Stats ─────────────────────────────────────────────
@@ -308,4 +333,28 @@ def platform_stats(request):
         'total_skills': Skill.objects.count(),
         'total_matches': Match.objects.count(),
         'active_rooms': CollaborationRoom.objects.filter(is_active=True).count(),
+    })
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def keep_alive(request):
+    """Lightweight health endpoint for uptime monitors."""
+    return Response({'status': 'ok'})
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def whoami(request):
+    """Return basic authentication context for debugging auth flows."""
+    user = request.user
+    if not user or not user.is_authenticated:
+        return Response({'authenticated': False, 'user': None})
+    return Response({
+        'authenticated': True,
+        'user': {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+        },
     })
