@@ -264,7 +264,7 @@ EMAIL_BACKEND = env(
     "EMAIL_BACKEND",
     default="django.core.mail.backends.console.EmailBackend" if DEBUG else "django.core.mail.backends.smtp.EmailBackend",
 )
-DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@unipeer.app")
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="UniPeer <noreply@mail.unipeer.me>")
 EMAIL_HOST = env("EMAIL_HOST", default="smtp.resend.com" if not DEBUG else "")
 EMAIL_PORT = env.int("EMAIL_PORT", default=587)
 EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="resend" if not DEBUG else "")
