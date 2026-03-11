@@ -1,6 +1,3 @@
-"""
-UniPeer API Views — Endpoints for profiles, matching, resources, and collaboration.
-"""
 
 from rest_framework import viewsets, status, generics
 from rest_framework.decorators import api_view, action
@@ -11,12 +8,14 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.views import APIView
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.models import User
+from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.db import models
+from django.core.mail import send_mail
 
 from .models import (
     Skill, Course, StudentProfile, Resource,
-    Match, CollaborationRoom, Message, Notification
+    Match, CollaborationRoom, Message, Notification, EmailVerificationCode
 )
 from .serializers import (
     SkillSerializer, CourseSerializer, StudentProfileSerializer,
@@ -27,6 +26,142 @@ from .serializers import (
 )
 from .ml_engine import StudentMatcher, ResourceRecommender
 from .throttles import NotificationAnonThrottle, NotificationBurstThrottle, NotificationUserThrottle
+
+
+def sync_suggested_matches_for_profile(profile, top_n=10):
+    """Compute and persist suggested matches for a profile, then return computed results."""
+    matcher = StudentMatcher()
+    all_profiles = StudentProfile.objects.all().select_related('user').prefetch_related('skills', 'courses')
+    results = matcher.compute_matches(profile, all_profiles, top_n=top_n)
+
+    for matched_profile, score, reasons in results:
+        id_a, id_b = sorted([profile.id, matched_profile.id])
+        reason_text = '; '.join(reasons) if isinstance(reasons, list) else str(reasons)
+
+        match, created = Match.objects.get_or_create(
+            student_a_id=id_a,
+            student_b_id=id_b,
+            defaults={
+                'similarity_score': score,
+                'match_reason': reason_text,
+                'status': 'suggested',
+            }
+        )
+
+        if not created and match.status == 'suggested':
+            match.similarity_score = score
+            match.match_reason = reason_text
+            match.save(update_fields=['similarity_score', 'match_reason'])
+
+    return results
+
+
+def get_recommended_resources_for_profile(profile, top_n=10):
+    """Compute resource recommendations for a profile and return ranked tuples."""
+    recommender = ResourceRecommender()
+    resources = Resource.objects.all().prefetch_related('related_courses', 'related_skills')
+    return recommender.recommend(profile, resources, top_n=top_n)
+
+
+def _generate_otp_code():
+    import random, string
+    return ''.join(random.choices(string.digits, k=6))
+
+
+def send_verification_email(request, user):
+    """Generate and send a 6-digit OTP code for email verification."""
+    code = _generate_otp_code()
+    EmailVerificationCode.objects.update_or_create(
+        user=user,
+        defaults={'code': code},
+    )
+
+    name = user.first_name or user.username
+    subject = "Your UniPeer verification code"
+
+    # ── Plain-text fallback ──────────────────────────────
+    plain_message = (
+        f"Hi {name},\n\n"
+        f"Your UniPeer email verification code is:\n\n    {code}\n\n"
+        "This code expires in 15 minutes.\n\n"
+        "If you did not create a UniPeer account, you can safely ignore this email.\n\n"
+        "— The UniPeer Team 🎓"
+    )
+
+    # ── HTML email ───────────────────────────────────────
+    code_digits = ''.join(
+        f'<span style="display:inline-block;width:44px;height:52px;line-height:52px;'
+        f'text-align:center;font-size:28px;font-weight:700;color:#ffffff;'
+        f'background:#4f46e5;border-radius:10px;margin:0 4px;">{d}</span>'
+        for d in code
+    )
+    html_message = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#0f0e17;font-family:'Segoe UI',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0f0e17;padding:40px 0;">
+    <tr><td align="center">
+      <table width="540" cellpadding="0" cellspacing="0" style="background:#1a1825;border-radius:20px;overflow:hidden;max-width:540px;width:100%;">
+
+        <!-- Header -->
+        <tr>
+          <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:36px 40px;text-align:center;">
+            <div style="font-size:40px;margin-bottom:8px;">🎓</div>
+            <div style="color:#ffffff;font-size:26px;font-weight:800;letter-spacing:-0.5px;">UniPeer</div>
+            <div style="color:rgba(255,255,255,0.75);font-size:13px;margin-top:4px;">Your Academic Network</div>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:40px;">
+            <p style="color:#e2e0f0;font-size:17px;margin:0 0 8px 0;">Hi <strong>{name}</strong> 👋</p>
+            <p style="color:#a09cbf;font-size:15px;margin:0 0 32px 0;">
+              Use the code below to verify your email address. It expires in <strong style="color:#a78bfa;">15&nbsp;minutes</strong>.
+            </p>
+
+            <!-- OTP digits -->
+            <div style="text-align:center;margin:0 0 32px 0;letter-spacing:2px;">
+              {code_digits}
+            </div>
+
+            <p style="color:#6b6886;font-size:13px;text-align:center;margin:0 0 32px 0;">
+              Enter this code on the verification page to activate your account.
+            </p>
+
+            <hr style="border:none;border-top:1px solid #2d2a40;margin:0 0 28px 0;">
+
+            <p style="color:#4a4761;font-size:12px;margin:0;text-align:center;line-height:1.6;">
+              Didn't sign up for UniPeer? You can safely ignore this email.<br>
+              This code cannot be used to access your account without your password.
+            </p>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="background:#13111f;padding:20px 40px;text-align:center;">
+            <p style="color:#4a4761;font-size:12px;margin:0;">
+              © 2026 UniPeer · Built for students, by students 🎓
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+
+    from django.core.mail import EmailMultiAlternatives
+    email_msg = EmailMultiAlternatives(
+        subject=subject,
+        body=plain_message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[user.email],
+    )
+    email_msg.attach_alternative(html_message, "text/html")
+    email_msg.send(fail_silently=False)
 
 
 # ─── Viewsets ──────────────────────────────────────────
@@ -50,9 +185,7 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
     def matches(self, request, pk=None):
         """Get ML-computed matches for a specific student."""
         profile = self.get_object()
-        matcher = StudentMatcher()
-        all_profiles = StudentProfile.objects.all().select_related('user').prefetch_related('skills', 'courses')
-        results = matcher.compute_matches(profile, all_profiles, top_n=10)
+        results = sync_suggested_matches_for_profile(profile, top_n=10)
 
         match_data = [
             {'profile': StudentProfileSerializer(p).data, 'score': round(s, 3), 'reasons': r}
@@ -64,9 +197,7 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
     def recommendations(self, request, pk=None):
         """Get resource recommendations for a specific student."""
         profile = self.get_object()
-        recommender = ResourceRecommender()
-        resources = Resource.objects.all().prefetch_related('related_courses', 'related_skills')
-        results = recommender.recommend(profile, resources, top_n=10)
+        results = get_recommended_resources_for_profile(profile, top_n=10)
 
         rec_data = [
             {'resource': ResourceSerializer(r).data, 'relevance_score': round(s, 3)}
@@ -80,14 +211,10 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
         profile = self.get_object()
 
         # Compute matches
-        matcher = StudentMatcher()
-        all_profiles = StudentProfile.objects.all().select_related('user').prefetch_related('skills', 'courses')
-        match_results = matcher.compute_matches(profile, all_profiles, top_n=5)
+        match_results = sync_suggested_matches_for_profile(profile, top_n=5)
 
         # Compute resource recommendations
-        recommender = ResourceRecommender()
-        resources = Resource.objects.all().prefetch_related('related_courses', 'related_skills')
-        rec_results = recommender.recommend(profile, resources, top_n=5)
+        rec_results = get_recommended_resources_for_profile(profile, top_n=5)
 
         # Count stats
         total_matches = Match.objects.filter(
@@ -122,6 +249,30 @@ class ResourceViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = Resource.objects.all().prefetch_related('related_courses', 'related_skills')
+        recommended_for_profile_id = self.request.query_params.get('recommended_for_profile_id')
+        if recommended_for_profile_id:
+            try:
+                profile = StudentProfile.objects.get(id=int(recommended_for_profile_id))
+            except (StudentProfile.DoesNotExist, TypeError, ValueError):
+                return queryset.none()
+
+            top_n_param = self.request.query_params.get('top_n', 10)
+            try:
+                top_n = max(1, min(int(top_n_param), 50))
+            except (TypeError, ValueError):
+                top_n = 10
+
+            recommended = get_recommended_resources_for_profile(profile, top_n=top_n)
+            recommended_ids = [resource.id for resource, _ in recommended]
+            if not recommended_ids:
+                return queryset.none()
+
+            order_case = models.Case(
+                *[models.When(id=resource_id, then=position) for position, resource_id in enumerate(recommended_ids)],
+                output_field=models.IntegerField(),
+            )
+            return queryset.filter(id__in=recommended_ids).order_by(order_case)
+
         uploader_profile_id = self.request.query_params.get('uploader_profile_id')
         if uploader_profile_id:
             queryset = queryset.filter(uploaded_by__profile__id=uploader_profile_id)
@@ -182,9 +333,16 @@ class MatchViewSet(viewsets.ModelViewSet):
         # Filter matches where the student is either a or b
         profile_id = self.request.query_params.get('profile_id')
         if profile_id:
-            return Match.objects.filter(
+            queryset = Match.objects.filter(
                 models.Q(student_a_id=profile_id) | models.Q(student_b_id=profile_id)
             )
+            if not queryset.exists():
+                profile = get_object_or_404(StudentProfile, id=profile_id)
+                sync_suggested_matches_for_profile(profile, top_n=10)
+                queryset = Match.objects.filter(
+                    models.Q(student_a_id=profile_id) | models.Q(student_b_id=profile_id)
+                )
+            return queryset
         return super().get_queryset()
 
     def create(self, request, *args, **kwargs):
@@ -292,8 +450,23 @@ class RegisterView(APIView):
         serializer = StudentProfileCreateSerializer(data=request.data)
         if serializer.is_valid():
             profile = serializer.save()
+            profile.email_verified = False
+            profile.save(update_fields=['email_verified'])
+            try:
+                send_verification_email(request, profile.user)
+            except Exception:
+                return Response(
+                    {
+                        'error': 'Account created, but verification email could not be sent. Please request resend.'
+                    },
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE
+                )
             return Response(
-                StudentProfileSerializer(profile).data,
+                {
+                    'profile': StudentProfileSerializer(profile).data,
+                    'email': profile.user.email,
+                    'message': 'Registration successful. Check your email for your verification code.',
+                },
                 status=status.HTTP_201_CREATED
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -316,8 +489,76 @@ class LoginView(APIView):
 
         user = authenticate(username=user.username, password=password)
         if user:
+            if hasattr(user, 'profile') and not user.profile.email_verified:
+                return Response(
+                    {'error': 'Email not verified. Please verify your email before logging in.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             return Response(StudentProfileSerializer(user.profile).data)
         return Response({'error': 'Invalid credentials'}, status=401)
+
+
+class VerifyEmailView(APIView):
+    """Verify user email using a 6-digit OTP code submitted from the frontend."""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = (request.data.get('email') or '').strip()
+        code = (request.data.get('code') or '').strip()
+
+        if not email or not code:
+            return Response({'error': 'Email and code are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = User.objects.filter(email=email).order_by('id').first()
+        if not user or not hasattr(user, 'profile'):
+            return Response({'error': 'Account not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if user.profile.email_verified:
+            return Response({'message': 'Email is already verified. You can log in.'})
+
+        try:
+            otp = EmailVerificationCode.objects.get(user=user)
+        except EmailVerificationCode.DoesNotExist:
+            return Response({'error': 'No verification code found. Please request a new one.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if otp.is_expired():
+            return Response({'error': 'Code has expired. Please request a new one.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if otp.code != code:
+            return Response({'error': 'Incorrect code. Please try again.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.profile.email_verified = True
+        user.profile.save(update_fields=['email_verified'])
+        otp.delete()
+
+        return Response({'message': 'Email verified successfully. You can now log in.'})
+
+
+class ResendVerificationEmailView(APIView):
+    """Resend email verification link for an existing unverified account."""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = (request.data.get('email') or '').strip()
+        if not email:
+            return Response({'error': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = User.objects.filter(email=email).order_by('id').first()
+        if not user or not hasattr(user, 'profile'):
+            return Response({'message': 'If the account exists, a verification email has been sent.'})
+
+        if user.profile.email_verified:
+            return Response({'message': 'Email is already verified.'})
+
+        try:
+            send_verification_email(request, user)
+        except Exception:
+            return Response(
+                {'error': 'Could not send verification email right now. Try again later.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response({'message': 'A new 6-digit code has been sent to your email.'})
 
 
 # ─── Stats ─────────────────────────────────────────────

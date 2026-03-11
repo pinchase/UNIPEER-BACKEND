@@ -57,6 +57,7 @@ class Badge(models.Model):
 class StudentProfile(models.Model):
     """Extended student profile for ML matching."""
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    email_verified = models.BooleanField(default=True)
     bio = models.TextField(blank=True, default='')
     avatar_url = models.URLField(blank=True, default='')
     university = models.CharField(max_length=200, default='University of Nairobi')
@@ -214,6 +215,21 @@ class Message(models.Model):
 
     def __str__(self):
         return f"{self.sender} @ {self.timestamp:%H:%M}"
+
+
+class EmailVerificationCode(models.Model):
+    """Short OTP code for email verification."""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='verification_code')
+    code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now=True)
+
+    def is_expired(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        return timezone.now() > self.created_at + timedelta(minutes=15)
+
+    def __str__(self):
+        return f"Code for {self.user.username}"
 
 
 class Notification(models.Model):

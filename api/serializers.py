@@ -52,7 +52,7 @@ class StudentProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = StudentProfile
         fields = [
-            'id', 'user', 'full_name', 'display_name', 'name', 'bio', 'avatar_url',
+            'id', 'user', 'full_name', 'display_name', 'name', 'email_verified', 'bio', 'avatar_url',
             'university', 'department', 'year_of_study', 'gpa',
             'interests', 'learning_goals', 'collaboration_preference',
             'skills', 'courses', 'skill_ids', 'course_ids',

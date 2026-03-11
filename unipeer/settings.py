@@ -254,3 +254,19 @@ if DEBUG:
 # DEFAULT AUTO FIELD
 # -----------------------------
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# -----------------------------
+# EMAIL (Verification)
+# -----------------------------
+RESEND_API_KEY = env("RESEND_API_KEY", default="")
+
+EMAIL_BACKEND = env(
+    "EMAIL_BACKEND",
+    default="django.core.mail.backends.console.EmailBackend" if DEBUG else "django.core.mail.backends.smtp.EmailBackend",
+)
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@unipeer.app")
+EMAIL_HOST = env("EMAIL_HOST", default="smtp.resend.com" if not DEBUG else "")
+EMAIL_PORT = env.int("EMAIL_PORT", default=587)
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="resend" if not DEBUG else "")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default=RESEND_API_KEY)
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
