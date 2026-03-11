@@ -328,6 +328,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
 class MatchViewSet(viewsets.ModelViewSet):
     queryset = Match.objects.all()
     serializer_class = MatchSerializer
+    permission_classes = [AllowAny]
 
     def get_queryset(self):
         # Filter matches where the student is either a or b
