@@ -12,6 +12,9 @@ from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.db import models
 from django.core.mail import send_mail
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import (
     Skill, Course, StudentProfile, Resource,
@@ -61,6 +64,62 @@ def get_recommended_resources_for_profile(profile, top_n=10):
     recommender = ResourceRecommender()
     resources = Resource.objects.all().prefetch_related('related_courses', 'related_skills')
     return recommender.recommend(profile, resources, top_n=top_n)
+
+
+def get_or_create_direct_room(student_a, student_b):
+    """Return the dedicated 1:1 room for two matched students."""
+    room = (
+        CollaborationRoom.objects
+        .filter(members=student_a)
+        .filter(members=student_b)
+        .annotate(member_count=models.Count('members', distinct=True))
+        .filter(member_count=2)
+        .order_by('id')
+        .first()
+    )
+
+    if room:
+        updated_fields = []
+        desired_name = f"Direct Chat: {student_a.user.username} & {student_b.user.username}"
+        desired_description = f"Private conversation between {student_a.user.get_full_name() or student_a.user.username} and {student_b.user.get_full_name() or student_b.user.username}"
+        if room.room_type != 'direct':
+            room.room_type = 'direct'
+            updated_fields.append('room_type')
+        if room.name != desired_name:
+            room.name = desired_name
+            updated_fields.append('name')
+        if room.description != desired_description:
+            room.description = desired_description
+            updated_fields.append('description')
+        if updated_fields:
+            room.save(update_fields=updated_fields)
+        return room, False
+
+    room = CollaborationRoom.objects.create(
+        name=f"Direct Chat: {student_a.user.username} & {student_b.user.username}",
+        description=f"Private conversation between {student_a.user.get_full_name() or student_a.user.username} and {student_b.user.get_full_name() or student_b.user.username}",
+        room_type='direct'
+    )
+    room.members.add(student_a, student_b)
+    return room, True
+
+
+def broadcast_room_message(message):
+    """Push a saved message to any connected websocket listeners for the room."""
+    channel_layer = get_channel_layer()
+    if not channel_layer:
+        return
+
+    serialized_message = MessageSerializer(
+        Message.objects.select_related('sender__user', 'room').get(pk=message.pk)
+    ).data
+    async_to_sync(channel_layer.group_send)(
+        f'room_{message.room_id}',
+        {
+            'type': 'chat.message',
+            'message': serialized_message,
+        }
+    )
 
 
 def _generate_otp_code():
@@ -380,16 +439,27 @@ class MatchViewSet(viewsets.ModelViewSet):
             }
         )
 
-        if created:
-            # Create a collaboration room for them
-            room_name = f"Chat: {student_a.user.username} & {student_b.user.username}"
-            room = CollaborationRoom.objects.create(
-                name=room_name,
-                description=f"Collaboration between {student_a.user.get_full_name()} and {student_b.user.get_full_name()}",
-                room_type='study'
-            )
-            room.members.add(student_a, student_b)
+        if not created:
+            updated_fields = []
+            if match.status != 'accepted':
+                match.status = 'accepted'
+                updated_fields.append('status')
+            if str(match.match_reason or '') != str(match_reason or ''):
+                match.match_reason = match_reason
+                updated_fields.append('match_reason')
+            try:
+                similarity_score_value = float(similarity_score)
+            except (TypeError, ValueError):
+                similarity_score_value = match.similarity_score
+            if match.similarity_score != similarity_score_value:
+                match.similarity_score = similarity_score_value
+                updated_fields.append('similarity_score')
+            if updated_fields:
+                match.save(update_fields=updated_fields)
 
+        room, room_created = get_or_create_direct_room(student_a, student_b)
+
+        if created:
             # Create notifications
             Notification.objects.create(
                 recipient=student_b,
@@ -402,7 +472,14 @@ class MatchViewSet(viewsets.ModelViewSet):
                 notification_type='match'
             )
 
-        return Response(MatchSerializer(match).data, status=status.HTTP_201_CREATED)
+        payload = MatchSerializer(match).data
+        payload['room_id'] = room.id
+        payload['room_created'] = room_created
+        payload['room'] = CollaborationRoomSerializer(room).data
+        return Response(
+            payload,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        )
 
 
 class CollaborationRoomViewSet(viewsets.ModelViewSet):
@@ -438,7 +515,11 @@ class CollaborationRoomViewSet(viewsets.ModelViewSet):
             return Response({'error': 'sender_id must be a valid ID'}, status=400)
 
         profile = get_object_or_404(StudentProfile, id=profile_id)
+        if not room.members.filter(id=profile.id).exists():
+            return Response({'error': 'Sender must belong to the room'}, status=403)
+
         msg = Message.objects.create(room=room, sender=profile, content=content)
+        broadcast_room_message(msg)
         return Response(MessageSerializer(msg).data, status=201)
 
 
@@ -496,7 +577,12 @@ class LoginView(APIView):
                     {'error': 'Email not verified. Please verify your email before logging in.'},
                     status=status.HTTP_403_FORBIDDEN,
                 )
-            return Response(StudentProfileSerializer(user.profile).data)
+            refresh = RefreshToken.for_user(user)
+            return Response({
+                'profile': StudentProfileSerializer(user.profile).data,
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+            })
         return Response({'error': 'Invalid credentials'}, status=401)
 
 

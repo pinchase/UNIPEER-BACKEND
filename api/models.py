@@ -192,6 +192,7 @@ class CollaborationRoom(models.Model):
     description = models.TextField(blank=True, default='')
     members = models.ManyToManyField(StudentProfile, related_name='rooms')
     room_type = models.CharField(max_length=20, choices=[
+        ('direct', 'Direct Message'),
         ('study', 'Study Group'),
         ('project', 'Project'),
         ('tutoring', 'Tutoring'),

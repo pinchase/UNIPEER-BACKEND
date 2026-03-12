@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "channels",
     "corsheaders",  # ✅ required for CORS
     "rest_framework",
     "drf_spectacular",
@@ -78,7 +79,26 @@ TEMPLATES = [
 ]
 
 ROOT_URLCONF = "unipeer.urls"
+ASGI_APPLICATION = "unipeer.asgi.application"
 WSGI_APPLICATION = "unipeer.wsgi.application"
+
+REDIS_URL = env("REDIS_URL", default="")
+
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [REDIS_URL],
+            },
+        }
+    }
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        }
+    }
 
 # -----------------------------
 # DATABASE
