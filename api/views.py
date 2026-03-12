@@ -408,6 +408,7 @@ class MatchViewSet(viewsets.ModelViewSet):
 class CollaborationRoomViewSet(viewsets.ModelViewSet):
     queryset = CollaborationRoom.objects.all().prefetch_related('members')
     serializer_class = CollaborationRoomSerializer
+    permission_classes = [AllowAny]
 
     def get_queryset(self):
         queryset = CollaborationRoom.objects.all().prefetch_related('members')
