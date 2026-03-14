@@ -13,7 +13,6 @@ from django.shortcuts import get_object_or_404
 from django.db import models
 from django.core.exceptions import ValidationError
 from django.contrib.auth.password_validation import validate_password
-from django.core.mail import EmailMultiAlternatives
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -130,6 +129,31 @@ def _generate_otp_code():
     return ''.join(random.choices(string.digits, k=6))
 
 
+def _send_resend_email(to_email, subject, html_message, plain_message):
+    """Send an email using the Resend API."""
+    api_key = (getattr(settings, 'RESEND_API_KEY', '') or '').strip()
+    if not api_key:
+        raise RuntimeError('RESEND_API_KEY is not configured.')
+
+    try:
+        import resend
+    except ImportError as exc:
+        raise RuntimeError('resend package is not installed.') from exc
+
+    resend.api_key = api_key
+    payload = {
+        'from': settings.DEFAULT_FROM_EMAIL,
+        'to': [to_email],
+        'subject': subject,
+        'html': html_message,
+        'text': plain_message,
+    }
+    response = resend.Emails.send(payload)
+    if not response:
+        raise RuntimeError('Resend API returned an empty response.')
+    return response
+
+
 def send_verification_email(request, user):
     """Generate and send a 6-digit OTP code for email verification."""
     code = _generate_otp_code()
@@ -215,14 +239,7 @@ def send_verification_email(request, user):
 </body>
 </html>"""
 
-    email_msg = EmailMultiAlternatives(
-        subject=subject,
-        body=plain_message,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        to=[user.email],
-    )
-    email_msg.attach_alternative(html_message, "text/html")
-    email_msg.send(fail_silently=False)
+    _send_resend_email(user.email, subject, html_message, plain_message)
 
 
 def send_password_reset_email(request, user, code):
@@ -304,14 +321,7 @@ def send_password_reset_email(request, user, code):
 </body>
 </html>"""
 
-    email_msg = EmailMultiAlternatives(
-        subject=subject,
-        body=plain_message,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        to=[user.email],
-    )
-    email_msg.attach_alternative(html_message, "text/html")
-    email_msg.send(fail_silently=False)
+    _send_resend_email(user.email, subject, html_message, plain_message)
 
 
 # ─── Viewsets ──────────────────────────────────────────
