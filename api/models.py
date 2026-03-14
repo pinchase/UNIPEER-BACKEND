@@ -4,6 +4,8 @@ UniPeer Models — Student profiles, courses, skills, resources, and matches.
 
 from django.db import models
 from django.contrib.auth.models import User
+from django.utils import timezone
+from datetime import timedelta
 import json
 
 
@@ -225,12 +227,23 @@ class EmailVerificationCode(models.Model):
     created_at = models.DateTimeField(auto_now=True)
 
     def is_expired(self):
-        from django.utils import timezone
-        from datetime import timedelta
         return timezone.now() > self.created_at + timedelta(minutes=15)
 
     def __str__(self):
         return f"Code for {self.user.username}"
+
+
+class PasswordResetCode(models.Model):
+    """Time-bound OTP used to secure password resets."""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='password_reset_code')
+    code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now=True)
+
+    def is_expired(self):
+        return timezone.now() > self.created_at + timedelta(minutes=15)
+
+    def __str__(self):
+        return f"Password reset code for {self.user.username}"
 
 
 class Notification(models.Model):

@@ -6,19 +6,22 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.views import APIView
-from django.contrib.auth import authenticate, login
+from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.db import models
-from django.core.mail import send_mail
+from django.core.exceptions import ValidationError
+from django.contrib.auth.password_validation import validate_password
+from django.core.mail import EmailMultiAlternatives
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import (
     Skill, Course, StudentProfile, Resource,
-    Match, CollaborationRoom, Message, Notification, EmailVerificationCode
+    Match, CollaborationRoom, Message, Notification,
+    EmailVerificationCode, PasswordResetCode
 )
 from .serializers import (
     SkillSerializer, CourseSerializer, StudentProfileSerializer,
@@ -212,7 +215,95 @@ def send_verification_email(request, user):
 </body>
 </html>"""
 
-    from django.core.mail import EmailMultiAlternatives
+    email_msg = EmailMultiAlternatives(
+        subject=subject,
+        body=plain_message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[user.email],
+    )
+    email_msg.attach_alternative(html_message, "text/html")
+    email_msg.send(fail_silently=False)
+
+
+def send_password_reset_email(request, user, code):
+    """Email a one-time reset code and instructions to the requester."""
+    name = user.first_name or user.username
+    subject = "Reset your UniPeer password"
+
+    plain_message = (
+        f"Hi {name},\n\n"
+        "A password reset was requested for your UniPeer account. "
+        f"Use the code below to set a new password. It expires in 15 minutes.\n\n"
+        f"Password reset code: {code}\n\n"
+        "If you did not request this, you can ignore this email.\n\n"
+        "— UniPeer Team 🎓"
+    )
+
+    code_digits = ''.join(
+        f'<span style="display:inline-block;width:44px;height:52px;line-height:52px;'
+        f'text-align:center;font-size:28px;font-weight:700;color:#ffffff;'
+        f'background:#dc2626;border-radius:10px;margin:0 4px;">{d}</span>'
+        for d in code
+    )
+
+    html_message = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#0f0e17;font-family:'Segoe UI',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0f0e17;padding:40px 0;">
+    <tr><td align="center">
+      <table width="540" cellpadding="0" cellspacing="0" style="background:#1a1825;border-radius:20px;overflow:hidden;max-width:540px;width:100%;">
+
+        <!-- Header -->
+        <tr>
+          <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:36px 40px;text-align:center;">
+            <div style="font-size:40px;margin-bottom:8px;">🎓</div>
+            <div style="color:#ffffff;font-size:26px;font-weight:800;letter-spacing:-0.5px;">UniPeer</div>
+            <div style="color:rgba(255,255,255,0.75);font-size:13px;margin-top:4px;">Secure Your Account</div>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:40px;">
+            <p style="color:#e2e0f0;font-size:17px;margin:0 0 8px 0;">Hi <strong>{name}</strong>,</p>
+            <p style="color:#a09cbf;font-size:15px;margin:0 0 32px 0;">
+              You requested to reset your UniPeer password. Enter the code below on the password reset
+              page and choose a new password. The code expires in <strong style="color:#f87171;">15 minutes</strong>.
+            </p>
+
+            <!-- OTP digits -->
+            <div style="text-align:center;margin:0 0 32px 0;letter-spacing:2px;">
+              {code_digits}
+            </div>
+
+            <p style="color:#6b6886;font-size:13px;text-align:center;margin:0 0 32px 0;">
+              Visit <a href="https://unipeer-frontend.vercel.app/reset-password.html" style="color:#a78bfa;">UniPeer Password Reset</a> and paste this code to finish.
+            </p>
+
+            <hr style="border:none;border-top:1px solid #2d2a40;margin:0 0 28px 0;">
+
+            <p style="color:#4a4761;font-size:12px;margin:0;text-align:center;line-height:1.6;">
+              If you did not request this, please ignore this email. The code cannot be used without your password.
+            </p>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="background:#13111f;padding:20px 40px;text-align:center;">
+            <p style="color:#4a4761;font-size:12px;margin:0;">
+              © 2026 UniPeer · Built for students, by students 🎓
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+
     email_msg = EmailMultiAlternatives(
         subject=subject,
         body=plain_message,
@@ -566,20 +657,29 @@ class LoginView(APIView):
         if not email or not password:
             return Response({'error': 'Email and password required'}, status=400)
 
-        user = User.objects.filter(email__iexact=email).order_by('-id').first()
-        if not user:
+        candidates = list(User.objects.filter(email__iexact=email).order_by('-id'))
+        if not candidates:
             return Response({'error': 'User not found'}, status=404)
 
-        user = authenticate(username=user.username, password=password)
-        if user:
-            if hasattr(user, 'profile') and not user.profile.email_verified:
+        authenticated_user = None
+        for candidate in candidates:
+            matched = authenticate(username=candidate.username, password=password)
+            if matched:
+                authenticated_user = matched
+                break
+
+        if authenticated_user:
+            if not hasattr(authenticated_user, 'profile'):
+                return Response({'error': 'Profile not found for this account.'}, status=404)
+
+            if not authenticated_user.profile.email_verified:
                 return Response(
                     {'error': 'Email not verified. Please verify your email before logging in.'},
                     status=status.HTTP_403_FORBIDDEN,
                 )
-            refresh = RefreshToken.for_user(user)
+            refresh = RefreshToken.for_user(authenticated_user)
             return Response({
-                'profile': StudentProfileSerializer(user.profile).data,
+                'profile': StudentProfileSerializer(authenticated_user.profile).data,
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),
             })
@@ -592,34 +692,64 @@ class VerifyEmailView(APIView):
 
     def post(self, request):
         email = (request.data.get('email') or '').strip().lower()
-        code = (request.data.get('code') or '').strip()
+        raw_code = (request.data.get('code') or '').strip()
+        code = ''.join(ch for ch in raw_code if ch.isdigit())
 
         if not email or not code:
             return Response({'error': 'Email and code are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = User.objects.filter(email__iexact=email).order_by('-id').first()
-        if not user or not hasattr(user, 'profile'):
+        if len(code) != 6:
+            return Response({'error': 'Code must be 6 digits.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        users = User.objects.filter(email__iexact=email).order_by('-id')
+        if not users.exists():
             return Response({'error': 'Account not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        if user.profile.email_verified:
-            return Response({'message': 'Email is already verified. You can log in.'})
+        otp = (
+            EmailVerificationCode.objects
+            .filter(user__email__iexact=email, code=code)
+            .select_related('user__profile')
+            .order_by('-created_at')
+            .first()
+        )
 
-        try:
-            otp = EmailVerificationCode.objects.get(user=user)
-        except EmailVerificationCode.DoesNotExist:
+        if otp:
+            if otp.is_expired():
+                return Response({'error': 'Code has expired. Please request a new one.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            user = otp.user
+            if not hasattr(user, 'profile'):
+                return Response({'error': 'Account not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+            if user.profile.email_verified:
+                otp.delete()
+                return Response({'message': 'Email is already verified. You can log in.'})
+
+            user.profile.email_verified = True
+            user.profile.save(update_fields=['email_verified'])
+
+            # Keep one-time semantics strict if legacy duplicate-email records exist.
+            EmailVerificationCode.objects.filter(user__email__iexact=email).delete()
+
+            return Response({'message': 'Email verified successfully. You can now log in.'})
+
+        latest_otp = (
+            EmailVerificationCode.objects
+            .filter(user__email__iexact=email)
+            .order_by('-created_at')
+            .first()
+        )
+
+        if not latest_otp:
+            any_verified = users.filter(profile__email_verified=True).exists()
+            if any_verified:
+                return Response({'message': 'Email is already verified. You can log in.'})
             return Response({'error': 'No verification code found. Please request a new one.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if otp.is_expired():
+        if latest_otp.is_expired():
             return Response({'error': 'Code has expired. Please request a new one.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if otp.code != code:
-            return Response({'error': 'Incorrect code. Please try again.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        user.profile.email_verified = True
-        user.profile.save(update_fields=['email_verified'])
-        otp.delete()
-
-        return Response({'message': 'Email verified successfully. You can now log in.'})
+        return Response({'error': 'Incorrect code. Please try again.'}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class ResendVerificationEmailView(APIView):
@@ -631,11 +761,17 @@ class ResendVerificationEmailView(APIView):
         if not email:
             return Response({'error': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = User.objects.filter(email__iexact=email).order_by('-id').first()
-        if not user or not hasattr(user, 'profile'):
+        users = list(User.objects.filter(email__iexact=email).order_by('-id'))
+        if not users:
             return Response({'message': 'If the account exists, a verification email has been sent.'})
 
-        if user.profile.email_verified:
+        user = None
+        for candidate in users:
+            if hasattr(candidate, 'profile') and not candidate.profile.email_verified:
+                user = candidate
+                break
+
+        if not user:
             return Response({'message': 'Email is already verified.'})
 
         try:
@@ -647,6 +783,79 @@ class ResendVerificationEmailView(APIView):
             )
 
         return Response({'message': 'A new 6-digit code has been sent to your email.'})
+
+
+class PasswordResetRequestView(APIView):
+    """Send a one-time reset code to the user's email."""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = (request.data.get('email') or '').strip().lower()
+        if not email:
+            return Response({'error': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = User.objects.filter(email__iexact=email).order_by('-id').first()
+        if not user:
+            return Response({'message': 'If an account exists, a password reset email has been sent.'})
+
+        code = _generate_otp_code()
+        PasswordResetCode.objects.update_or_create(
+            user=user,
+            defaults={'code': code}
+        )
+
+        try:
+            send_password_reset_email(request, user, code)
+        except Exception:
+            return Response(
+                {'error': 'Could not send password reset email. Try again later.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        return Response({'message': 'If an account exists, a password reset email has been sent.'})
+
+
+class PasswordResetConfirmView(APIView):
+    """Confirm a reset code and replace the user's password."""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = (request.data.get('email') or '').strip().lower()
+        code = (request.data.get('code') or '').strip()
+        password = request.data.get('password') or ''
+
+        if not email or not code or not password:
+            return Response({'error': 'Email, code, and new password are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if len(code) != 6 or not code.isdigit():
+            return Response({'error': 'Code must be 6 digits.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = User.objects.filter(email__iexact=email).order_by('-id').first()
+        if not user:
+            return Response({'error': 'Account not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            reset = user.password_reset_code
+        except PasswordResetCode.DoesNotExist:
+            return Response({'error': 'Reset code not found. Request a new one.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if reset.is_expired():
+            reset.delete()
+            return Response({'error': 'Code has expired. Request a new one.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if reset.code != code:
+            return Response({'error': 'Incorrect code.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            validate_password(password, user)
+        except ValidationError as exc:
+            return Response({'error': exc.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(password)
+        user.save()
+        reset.delete()
+
+        return Response({'message': 'Password reset successful. You can now log in.'})
 
 
 # ─── Stats ─────────────────────────────────────────────
