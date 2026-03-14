@@ -103,6 +103,14 @@ class StudentProfileCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError("Username already exists.")
         return value
 
+    def validate_email(self, value):
+        normalized = (value or '').strip().lower()
+        if User.objects.filter(email__iexact=normalized).exists():
+            raise serializers.ValidationError(
+                "An account with this email already exists. Please log in or verify your email."
+            )
+        return normalized
+
     def create(self, validated_data):
         skill_ids = validated_data.pop('skill_ids', [])
         course_ids = validated_data.pop('course_ids', [])

@@ -560,13 +560,13 @@ class LoginView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = request.data.get('email')
+        email = (request.data.get('email') or '').strip().lower()
         password = request.data.get('password')
 
         if not email or not password:
             return Response({'error': 'Email and password required'}, status=400)
 
-        user = User.objects.filter(email=email).order_by('id').first()
+        user = User.objects.filter(email__iexact=email).order_by('-id').first()
         if not user:
             return Response({'error': 'User not found'}, status=404)
 
@@ -591,13 +591,13 @@ class VerifyEmailView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = (request.data.get('email') or '').strip()
+        email = (request.data.get('email') or '').strip().lower()
         code = (request.data.get('code') or '').strip()
 
         if not email or not code:
             return Response({'error': 'Email and code are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = User.objects.filter(email=email).order_by('id').first()
+        user = User.objects.filter(email__iexact=email).order_by('-id').first()
         if not user or not hasattr(user, 'profile'):
             return Response({'error': 'Account not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -627,11 +627,11 @@ class ResendVerificationEmailView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = (request.data.get('email') or '').strip()
+        email = (request.data.get('email') or '').strip().lower()
         if not email:
             return Response({'error': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = User.objects.filter(email=email).order_by('id').first()
+        user = User.objects.filter(email__iexact=email).order_by('-id').first()
         if not user or not hasattr(user, 'profile'):
             return Response({'message': 'If the account exists, a verification email has been sent.'})
 
