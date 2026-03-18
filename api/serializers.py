@@ -45,6 +45,11 @@ class StudentProfileSerializer(serializers.ModelSerializer):
     course_ids = serializers.PrimaryKeyRelatedField(
         queryset=Course.objects.all(), many=True, write_only=True, source='courses', required=False
     )
+    skill_names = serializers.ListField(child=serializers.CharField(), write_only=True, required=False)
+    course_names = serializers.ListField(child=serializers.CharField(), write_only=True, required=False)
+    first_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    last_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
     full_name = serializers.SerializerMethodField()
     display_name = serializers.SerializerMethodField()
     name = serializers.SerializerMethodField()
@@ -55,7 +60,8 @@ class StudentProfileSerializer(serializers.ModelSerializer):
             'id', 'user', 'full_name', 'display_name', 'name', 'email_verified', 'bio', 'avatar_url',
             'university', 'department', 'year_of_study', 'gpa',
             'interests', 'learning_goals', 'collaboration_preference',
-            'skills', 'courses', 'skill_ids', 'course_ids',
+            'skills', 'courses', 'skill_ids', 'course_ids', 'skill_names', 'course_names',
+            'first_name', 'last_name', 'email',
             'available_hours_per_week', 'preferred_time',
             'total_xp', 'current_level', 'badges',
             'created_at', 'updated_at',
@@ -69,6 +75,73 @@ class StudentProfileSerializer(serializers.ModelSerializer):
 
     def get_name(self, obj):
         return obj.user.get_full_name() or obj.user.username
+
+    def update(self, instance, validated_data):
+        user = instance.user
+        first_name = validated_data.pop('first_name', None)
+        last_name = validated_data.pop('last_name', None)
+        email = validated_data.pop('email', None)
+        skill_names = validated_data.pop('skill_names', None)
+        course_names = validated_data.pop('course_names', None)
+        skills = validated_data.pop('skills', None)
+        courses = validated_data.pop('courses', None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        user_dirty = False
+        if first_name is not None:
+            user.first_name = first_name
+            user_dirty = True
+        if last_name is not None:
+            user.last_name = last_name
+            user_dirty = True
+        if email is not None:
+            user.email = email.strip().lower()
+            user_dirty = True
+        if user_dirty:
+            user.save()
+
+        if skills is not None or skill_names is not None:
+            normalized_skills = list(skills) if skills is not None else []
+            for raw_name in skill_names or []:
+                name = raw_name.strip()
+                if not name:
+                    continue
+                skill, _ = Skill.objects.get_or_create(name=name)
+                normalized_skills.append(skill)
+            instance.skills.set(normalized_skills)
+
+        if courses is not None or course_names is not None:
+            normalized_courses = list(courses) if courses is not None else []
+            for raw_name in course_names or []:
+                name = raw_name.strip()
+                if not name:
+                    continue
+                if ' - ' in name:
+                    code, cname = name.split(' - ', 1)
+                    course, _ = Course.objects.get_or_create(
+                        code=code.strip(),
+                        defaults={
+                            'name': cname.strip(),
+                            'department': instance.department,
+                            'level': 100,
+                        },
+                    )
+                else:
+                    course, _ = Course.objects.get_or_create(
+                        code=name[:20],
+                        defaults={
+                            'name': name,
+                            'department': instance.department,
+                            'level': 100,
+                        },
+                    )
+                normalized_courses.append(course)
+            instance.courses.set(normalized_courses)
+
+        return instance
 
 
 class StudentProfileCreateSerializer(serializers.Serializer):
