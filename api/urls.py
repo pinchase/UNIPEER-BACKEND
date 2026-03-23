@@ -1,7 +1,3 @@
-"""
-API URL configuration.
-"""
-
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
@@ -28,4 +24,5 @@ urlpatterns = [
     path('stats/', views.platform_stats, name='platform-stats'),
     path('keep-alive/', views.keep_alive, name='keep-alive'),
     path('whoami/', views.whoami, name='whoami'),
+    path('academic-status/', views.academic_status, name='academic-status'),
 ]

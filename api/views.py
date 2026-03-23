@@ -1,8 +1,7 @@
-
 from rest_framework import viewsets, status, generics
 from rest_framework.decorators import api_view, action
 from rest_framework.decorators import permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.views import APIView
@@ -348,7 +347,7 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
         results = sync_suggested_matches_for_profile(profile, top_n=10)
 
         match_data = [
-            {'profile': StudentProfileSerializer(p).data, 'score': round(s, 3), 'reasons': r}
+            {'profile': StudentProfileSerializer(p, context={'request': request}).data, 'score': round(s, 3), 'reasons': r}
             for p, s, r in results
         ]
         return Response(match_data)
@@ -385,13 +384,13 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
         active_rooms = profile.rooms.filter(is_active=True).count()
 
         data = {
-            'profile': StudentProfileSerializer(profile).data,
+            'profile': StudentProfileSerializer(profile, context={'request': request}).data,
             'total_matches': total_matches,
             'active_rooms': active_rooms,
             'recommended_resources_count': len(rec_results),
             'uploaded_resources_count': Resource.objects.filter(uploaded_by=profile.user).count(),
             'top_matches': [
-                {'profile': StudentProfileSerializer(p).data, 'score': round(s, 3), 'reasons': r}
+                {'profile': StudentProfileSerializer(p, context={'request': request}).data, 'score': round(s, 3), 'reasons': r}
                 for p, s, r in match_results
             ],
             'recent_resources': [
@@ -647,7 +646,7 @@ class RegisterView(APIView):
                 )
             return Response(
                 {
-                    'profile': StudentProfileSerializer(profile).data,
+                    'profile': StudentProfileSerializer(profile, context={'request': request}).data,
                     'email': profile.user.email,
                     'message': 'Registration successful. Check your email for your verification code.',
                 },
@@ -689,7 +688,7 @@ class LoginView(APIView):
                 )
             refresh = RefreshToken.for_user(authenticated_user)
             return Response({
-                'profile': StudentProfileSerializer(authenticated_user.profile).data,
+                'profile': StudentProfileSerializer(authenticated_user.profile, context={'request': request}).data,
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),
             })
@@ -711,13 +710,13 @@ class VerifyEmailView(APIView):
         if len(code) != 6:
             return Response({'error': 'Code must be 6 digits.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        users = User.objects.filter(email__iexact=email).order_by('-id')
+        users = User.objects.filter(email__iexact(email)).order_by('-id')
         if not users.exists():
             return Response({'error': 'Account not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         otp = (
             EmailVerificationCode.objects
-            .filter(user__email__iexact=email, code=code)
+            .filter(user__email__iexact(email, code=code))
             .select_related('user__profile')
             .order_by('-created_at')
             .first()
@@ -739,13 +738,13 @@ class VerifyEmailView(APIView):
             user.profile.save(update_fields=['email_verified'])
 
             # Keep one-time semantics strict if legacy duplicate-email records exist.
-            EmailVerificationCode.objects.filter(user__email__iexact=email).delete()
+            EmailVerificationCode.objects.filter(user__email__iexact(email)).delete()
 
             return Response({'message': 'Email verified successfully. You can now log in.'})
 
         latest_otp = (
             EmailVerificationCode.objects
-            .filter(user__email__iexact=email)
+            .filter(user__email__iexact(email))
             .order_by('-created_at')
             .first()
         )
@@ -771,7 +770,7 @@ class ResendVerificationEmailView(APIView):
         if not email:
             return Response({'error': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        users = list(User.objects.filter(email__iexact=email).order_by('-id'))
+        users = list(User.objects.filter(email__iexact(email)).order_by('-id'))
         if not users:
             return Response({'message': 'If the account exists, a verification email has been sent.'})
 
@@ -804,7 +803,7 @@ class PasswordResetRequestView(APIView):
         if not email:
             return Response({'error': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = User.objects.filter(email__iexact=email).order_by('-id').first()
+        user = User.objects.filter(email__iexact(email).order_by('-id').first()
         if not user:
             return Response({'message': 'If an account exists, a password reset email has been sent.'})
 
@@ -840,7 +839,7 @@ class PasswordResetConfirmView(APIView):
         if len(code) != 6 or not code.isdigit():
             return Response({'error': 'Code must be 6 digits.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = User.objects.filter(email__iexact=email).order_by('-id').first()
+        user = User.objects.filter(email__iexact(email)).order_by('-id').first()
         if not user:
             return Response({'error': 'Account not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -906,3 +905,20 @@ def whoami(request):
             'email': user.email,
         },
     })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def academic_status(request):
+    """Return whether the authenticated user's profile is academically complete."""
+    user = request.user
+    try:
+        profile = user.profile
+    except Exception:
+        return Response({'is_academic_complete': False})
+
+    try:
+        complete = bool(profile.is_academic_complete())
+    except Exception:
+        complete = False
+    return Response({'is_academic_complete': complete})

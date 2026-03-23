@@ -1,7 +1,3 @@
-"""
-UniPeer DRF Serializers.
-"""
-
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from .models import (
@@ -53,6 +49,7 @@ class StudentProfileSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     display_name = serializers.SerializerMethodField()
     name = serializers.SerializerMethodField()
+    match_score = serializers.SerializerMethodField()
 
     class Meta:
         model = StudentProfile
@@ -64,17 +61,38 @@ class StudentProfileSerializer(serializers.ModelSerializer):
             'first_name', 'last_name', 'email',
             'available_hours_per_week', 'preferred_time',
             'total_xp', 'current_level', 'badges',
-            'created_at', 'updated_at',
+            'created_at', 'updated_at', 'match_score',
         ]
 
+    def _can_view_personal(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        if request.user == getattr(obj, 'user', None):
+            return True
+        return bool(getattr(obj, 'show_personal_info', False))
+
     def get_full_name(self, obj):
-        return obj.user.get_full_name() or obj.user.username
+        if self._can_view_personal(obj):
+            return obj.user.get_full_name() or obj.user.username
+        return None
 
     def get_display_name(self, obj):
-        return obj.user.get_full_name() or obj.user.username
+        if self._can_view_personal(obj):
+            return obj.user.get_full_name() or obj.user.username
+        return None
 
     def get_name(self, obj):
-        return obj.user.get_full_name() or obj.user.username
+        if self._can_view_personal(obj):
+            return obj.user.get_full_name() or obj.user.username
+        return None
+
+    def get_match_score(self, obj):
+        # match_score may be attached to object by view as attribute or passed via context
+        score = getattr(obj, 'match_score', None)
+        if score is None:
+            score = self.context.get('match_score')
+        return round(score, 3) if score is not None else None
 
     def update(self, instance, validated_data):
         user = instance.user

@@ -1,14 +1,7 @@
-"""
-Custom permissions for UniPeer API.
-"""
-
 from rest_framework import permissions
 
 
 class IsOwnerOrReadOnly(permissions.BasePermission):
-    """
-    Custom permission to only allow owners of an object to edit it.
-    """
 
     def has_object_permission(self, request, view, obj):
         # Read permissions are allowed to any authenticated request
@@ -24,20 +17,12 @@ class IsOwnerOrReadOnly(permissions.BasePermission):
 
 
 class IsProfileOwner(permissions.BasePermission):
-    """
-    Only allow users to access/edit their own profile.
-    """
-
     def has_object_permission(self, request, view, obj):
         # For StudentProfile objects
         return obj.user == request.user
 
 
 class IsRoomMember(permissions.BasePermission):
-    """
-    Only allow room members to access room data and messages.
-    """
-
     def has_object_permission(self, request, view, obj):
         # Check if user's profile is in the room members
         try:
@@ -48,10 +33,6 @@ class IsRoomMember(permissions.BasePermission):
 
 
 class IsNotificationRecipient(permissions.BasePermission):
-    """
-    Only allow notification recipients to view their own notifications.
-    """
-
     def has_object_permission(self, request, view, obj):
         try:
             return obj.recipient.user == request.user
@@ -60,10 +41,6 @@ class IsNotificationRecipient(permissions.BasePermission):
 
 
 class IsMatchParticipant(permissions.BasePermission):
-    """
-    Only allow match participants to view/modify their matches.
-    """
-
     def has_object_permission(self, request, view, obj):
         try:
             user_profile = request.user.profile

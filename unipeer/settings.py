@@ -1,7 +1,3 @@
-"""
-Django settings for UniPeer project (Production Ready)
-"""
-
 from pathlib import Path
 import os
 import environ
@@ -40,7 +36,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "channels",
-    "corsheaders",  # ✅ required for CORS
+    "corsheaders",  
     "rest_framework",
     "drf_spectacular",
     "api",
@@ -48,7 +44,7 @@ INSTALLED_APPS = [
 
 
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",  # ✅ must be at top
+    "corsheaders.middleware.CorsMiddleware", 
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -59,13 +55,11 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-# -----------------------------
 # TEMPLATES
-# -----------------------------
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],  # add BASE_DIR / "templates" if needed
+        "DIRS": [], 
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -100,16 +94,13 @@ else:
         }
     }
 
-# -----------------------------
 # DATABASE
-# -----------------------------
 DATABASE_URL = env("DATABASE_URL", default=None)
 
 if DATABASE_URL:
     DATABASES = {
         "default": env.db("DATABASE_URL")
     }
-    # ✅ Render PostgreSQL SSL
     if DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql":
         DATABASES["default"]["OPTIONS"] = {"sslmode": "require"}
 
@@ -121,9 +112,7 @@ else:
         }
     }
 
-# -----------------------------
 # PASSWORD VALIDATION
-# -----------------------------
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -137,27 +126,22 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-# -----------------------------
 # STATIC FILES
-# -----------------------------
+
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
-# ✅ Optional static files dirs
 _optional_static_dir = BASE_DIR / "static"
 STATICFILES_DIRS = [_optional_static_dir] if _optional_static_dir.exists() else []
 
-# -----------------------------
+
 # MEDIA FILES
-# -----------------------------
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-# -----------------------------
 # DJANGO REST FRAMEWORK
-# -----------------------------
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -204,9 +188,7 @@ SIMPLE_JWT = {
     "USER_ID_CLAIM": "user_id",
 }
 
-# -----------------------------
 # CORS CONFIGURATION
-# -----------------------------
 def get_allowed_origins():
     origins = [
         "https://unipeer-frontend.vercel.app",
@@ -234,12 +216,9 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://0\.0\.0\.0:\d+$",
 ]
 
-# ✅ Credentials only needed for session cookies
 CORS_ALLOW_CREDENTIALS = False
 
-# -----------------------------
-# SECURITY (Production Hardened)
-# -----------------------------
+# SECURITY SETTINGS
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = not DEBUG
 SESSION_COOKIE_SECURE = not DEBUG
@@ -270,14 +249,10 @@ if DEBUG:
         "http://0.0.0.0:5500",
     ])
 
-# -----------------------------
 # DEFAULT AUTO FIELD
-# -----------------------------
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# -----------------------------
-# EMAIL (Verification)
-# -----------------------------
+# EMAIL (Verification and password reset)
 RESEND_API_KEY = env("RESEND_API_KEY", default="")
 
 EMAIL_BACKEND = env(

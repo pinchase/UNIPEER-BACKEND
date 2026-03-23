@@ -1,22 +1,9 @@
-"""
-UniPeer ML Engine — Cosine similarity matching and resource recommendation.
-
-Uses TF-IDF vectorization on student profiles (skills, interests, courses,
-learning goals) and computes pairwise cosine similarity to rank matches.
-Resource recommendation uses the same content-based approach.
-"""
-
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
 
 class StudentMatcher:
-    """
-    ML-based student matching engine using cosine similarity
-    on TF-IDF vectors of student profile features.
-    """
-
     def __init__(self):
         self.vectorizer = TfidfVectorizer(
             stop_words='english',
@@ -24,25 +11,21 @@ class StudentMatcher:
             ngram_range=(1, 2),
         )
 
-    def compute_matches(self, target_profile, all_profiles, top_n=10):
-        """
-        Compute similarity scores between a target student and all other students.
+    def compute_matches(self, target_profile, all_profiles, top_n=10, min_score=0.3):
+      
+        # If the target profile is not academically complete, do not compute matches
+        if not getattr(target_profile, 'is_academic_complete', lambda: True)():
+            return []
 
-        Args:
-            target_profile: StudentProfile instance
-            all_profiles: QuerySet of all StudentProfile instances
-            top_n: Number of top matches to return
-
-        Returns:
-            List of (profile, score, reasons) tuples sorted by score desc
-        """
-        profiles = list(all_profiles.exclude(id=target_profile.id))
-        if not profiles:
+        # Only consider candidates that are academically complete
+        candidates_qs = all_profiles.exclude(id=target_profile.id)
+        candidates = [p for p in candidates_qs if getattr(p, 'is_academic_complete', lambda: True)()]
+        if not candidates:
             return []
 
         # Build feature texts
         target_text = target_profile.get_feature_text()
-        all_texts = [target_text] + [p.get_feature_text() for p in profiles]
+        all_texts = [target_text] + [p.get_feature_text() for p in candidates]
 
         # TF-IDF vectorize
         tfidf_matrix = self.vectorizer.fit_transform(all_texts)
@@ -53,7 +36,7 @@ class StudentMatcher:
         similarities = cosine_similarity(target_vector, other_vectors).flatten()
 
         # Apply bonus for shared attributes
-        for i, profile in enumerate(profiles):
+        for i, profile in enumerate(candidates):
             bonus = 0.0
 
             # Same department bonus
@@ -92,18 +75,21 @@ class StudentMatcher:
 
             similarities[i] = min(1.0, similarities[i] + bonus)
 
-        # Rank and return top N
-        ranked_indices = np.argsort(similarities)[::-1][:top_n]
+        # Rank and return top N filtering by min_score
+        ranked_indices = np.argsort(similarities)[::-1]
         results = []
         for idx in ranked_indices:
-            if similarities[idx] > 0.01:
-                reasons = self._generate_match_reasons(target_profile, profiles[idx])
-                results.append((profiles[idx], float(similarities[idx]), reasons))
+            score = float(similarities[idx])
+            if score < min_score:
+                continue
+            reasons = self._generate_match_reasons(target_profile, candidates[idx])
+            results.append((candidates[idx], score, reasons))
+            if len(results) >= top_n:
+                break
 
         return results
 
     def _generate_match_reasons(self, profile_a, profile_b):
-        """Generate human-readable reasons for a match."""
         reasons = []
 
         # Check shared courses
@@ -133,10 +119,6 @@ class StudentMatcher:
 
 
 class ResourceRecommender:
-    """
-    Content-based resource recommendation engine.
-    Matches student profiles against resource descriptions using TF-IDF + cosine similarity.
-    """
 
     def __init__(self):
         self.vectorizer = TfidfVectorizer(
@@ -146,17 +128,6 @@ class ResourceRecommender:
         )
 
     def recommend(self, student_profile, resources, top_n=10):
-        """
-        Recommend resources for a student based on their profile.
-
-        Args:
-            student_profile: StudentProfile instance
-            resources: QuerySet of Resource instances
-            top_n: Number of recommendations to return
-
-        Returns:
-            List of (resource, relevance_score) tuples
-        """
         resource_list = list(resources)
         if not resource_list:
             return []

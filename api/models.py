@@ -1,7 +1,3 @@
-"""
-UniPeer Models — Student profiles, courses, skills, resources, and matches.
-"""
-
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -10,7 +6,6 @@ import json
 
 
 class Skill(models.Model):
-    """Academic or technical skill."""
     name = models.CharField(max_length=100, unique=True)
     category = models.CharField(max_length=50, choices=[
         ('programming', 'Programming'),
@@ -45,7 +40,6 @@ class Course(models.Model):
 
 
 class Badge(models.Model):
-    """Achievements earned by students."""
     name = models.CharField(max_length=100)
     description = models.TextField()
     icon_emoji = models.CharField(max_length=10)
@@ -57,7 +51,6 @@ class Badge(models.Model):
 
 
 class StudentProfile(models.Model):
-    """Extended student profile for ML matching."""
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     email_verified = models.BooleanField(default=True)
     bio = models.TextField(blank=True, default='')
@@ -66,6 +59,9 @@ class StudentProfile(models.Model):
     department = models.CharField(max_length=200, default='')
     year_of_study = models.IntegerField(default=1)
     gpa = models.FloatField(default=0.0)
+
+    # New privacy flag: when False, personal fields are hidden to other users
+    show_personal_info = models.BooleanField(default=False, help_text='If True, allow other users to see personal info (name, email, avatar).')
 
     # Gamification
     total_xp = models.IntegerField(default=0)
@@ -104,8 +100,19 @@ class StudentProfile(models.Model):
     def __str__(self):
         return f"{self.user.get_full_name() or self.user.username}'s Profile"
 
+    def is_academic_complete(self):
+        # Require department and year_of_study and at least one course or skill
+        if not self.department or not self.year_of_study:
+            return False
+        try:
+            has_course = self.courses.exists()
+            has_skill = self.skills.exists()
+        except Exception:
+            has_course = False
+            has_skill = False
+        return (has_course or has_skill)
+
     def get_feature_text(self):
-        """Generate a combined text representation for ML feature extraction."""
         parts = []
         parts.append(self.department)
         parts.append(self.interests)
@@ -117,7 +124,6 @@ class StudentProfile(models.Model):
 
 
 class Resource(models.Model):
-    """Academic resource for recommendation."""
     RESOURCE_TYPES = [
         ('textbook', 'Textbook'),
         ('video', 'Video Lecture'),
@@ -155,7 +161,6 @@ class Resource(models.Model):
         return self.title
 
     def get_feature_text(self):
-        """Generate text representation for content-based filtering."""
         parts = [
             self.title,
             self.description,
@@ -168,7 +173,6 @@ class Resource(models.Model):
 
 
 class Match(models.Model):
-    """Record of a match between two students."""
     student_a = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name='matches_as_a')
     student_b = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name='matches_as_b')
     similarity_score = models.FloatField()
@@ -189,7 +193,6 @@ class Match(models.Model):
 
 
 class CollaborationRoom(models.Model):
-    """A collaboration room for matched students."""
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True, default='')
     members = models.ManyToManyField(StudentProfile, related_name='rooms')
@@ -207,7 +210,6 @@ class CollaborationRoom(models.Model):
 
 
 class Message(models.Model):
-    """Chat message in a collaboration room."""
     room = models.ForeignKey(CollaborationRoom, on_delete=models.CASCADE, related_name='messages')
     sender = models.ForeignKey(StudentProfile, on_delete=models.CASCADE)
     content = models.TextField()
@@ -221,7 +223,6 @@ class Message(models.Model):
 
 
 class EmailVerificationCode(models.Model):
-    """Short OTP code for email verification."""
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='verification_code')
     code = models.CharField(max_length=6)
     created_at = models.DateTimeField(auto_now=True)
@@ -234,7 +235,6 @@ class EmailVerificationCode(models.Model):
 
 
 class PasswordResetCode(models.Model):
-    """Time-bound OTP used to secure password resets."""
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='password_reset_code')
     code = models.CharField(max_length=6)
     created_at = models.DateTimeField(auto_now=True)
@@ -247,7 +247,6 @@ class PasswordResetCode(models.Model):
 
 
 class Notification(models.Model):
-    """User notifications for matches and resources."""
     recipient = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name='notifications')
     message = models.CharField(max_length=255)
     notification_type = models.CharField(max_length=20, choices=[

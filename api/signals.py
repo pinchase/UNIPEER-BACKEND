@@ -3,7 +3,6 @@ from django.dispatch import receiver
 from .models import Match, Resource, Notification, StudentProfile, Skill, Course, Message, Badge
 
 def check_badges(profile):
-    """Check and award badges based on student progress."""
     badges = Badge.objects.all()
     unlocked = profile.badges.all()
     
@@ -35,7 +34,6 @@ def check_badges(profile):
             )
 
 def add_xp(profile, amount):
-    """Award XP, handle level-ups, and check for badges."""
     profile.total_xp += amount
     new_level = (profile.total_xp // 100) + 1
     
@@ -92,9 +90,6 @@ def award_message_xp(sender, instance, created, **kwargs):
 def notify_interested_students(sender, instance, action, reverse, model, pk_set, **kwargs):
     """Notify students when a resource is tagged with skills/courses they have."""
     if action == 'post_add' and not reverse:
-        # 'instance' is the Resource
-        # 'model' is the Skill or Course class
-        # 'pk_set' are the IDs of the added skills/courses
         
         interested_students = set()
         
