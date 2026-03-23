@@ -216,7 +216,14 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://0\.0\.0\.0:\d+$",
 ]
 
-CORS_ALLOW_CREDENTIALS = False
+# Ensure Vercel preview domains are explicitly allowed. You can override
+# behavior via the VERCEL_ORIGIN_REGEX env var if needed.
+VERCEL_ORIGIN_REGEX = env("VERCEL_ORIGIN_REGEX", default=r"^https://.*\\.vercel\\.app$")
+if VERCEL_ORIGIN_REGEX and VERCEL_ORIGIN_REGEX not in CORS_ALLOWED_ORIGIN_REGEXES:
+    CORS_ALLOWED_ORIGIN_REGEXES.insert(0, VERCEL_ORIGIN_REGEX)
+
+# Allow configuring whether credentials (cookies) are accepted from the frontend.
+CORS_ALLOW_CREDENTIALS = env.bool("CORS_ALLOW_CREDENTIALS", default=False)
 
 # SECURITY SETTINGS
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
