@@ -323,7 +323,7 @@ def send_password_reset_email(request, user, code):
     _send_resend_email(user.email, subject, html_message, plain_message)
 
 
-# ─── Viewsets ──────────────────────────────────────────
+# ─── Viewsets 
 
 class SkillViewSet(viewsets.ModelViewSet):
     queryset = Skill.objects.all()
@@ -342,7 +342,6 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def matches(self, request, pk=None):
-        """Get ML-computed matches for a specific student."""
         profile = self.get_object()
         results = sync_suggested_matches_for_profile(profile, top_n=10)
 
@@ -354,7 +353,6 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def recommendations(self, request, pk=None):
-        """Get resource recommendations for a specific student."""
         profile = self.get_object()
         results = get_recommended_resources_for_profile(profile, top_n=10)
 
@@ -366,7 +364,6 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def dashboard(self, request, pk=None):
-        """Get dashboard data for a student."""
         profile = self.get_object()
 
         # Compute matches
@@ -438,8 +435,6 @@ class ResourceViewSet(viewsets.ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
-        # In this demo app, we might not have a logged-in user via session.
-        # We check for an 'uploader_id' in the form data (which corresponds to StudentProfile.id)
         uploader_profile_id = self.request.data.get('uploader_id')
         user = self.request.user
         
@@ -450,7 +445,6 @@ class ResourceViewSet(viewsets.ModelViewSet):
             except (StudentProfile.DoesNotExist, ValueError, TypeError):
                 pass
                 
-        # If we found a valid user, assign it
         if user and user.is_authenticated:
             serializer.save(uploaded_by=user)
         else:
@@ -623,7 +617,7 @@ class CollaborationRoomViewSet(viewsets.ModelViewSet):
         return Response(MessageSerializer(msg).data, status=201)
 
 
-# ─── Registration ──────────────────────────────────────
+# ─── Registration
 
 class RegisterView(APIView):
     """Register a new student and create their profile."""
@@ -656,7 +650,6 @@ class RegisterView(APIView):
 
 
 class LoginView(APIView):
-    """Authenticate a student via email and password."""
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -696,7 +689,6 @@ class LoginView(APIView):
 
 
 class VerifyEmailView(APIView):
-    """Verify user email using a 6-digit OTP code submitted from the frontend."""
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -762,7 +754,6 @@ class VerifyEmailView(APIView):
 
 
 class ResendVerificationEmailView(APIView):
-    """Resend email verification link for an existing unverified account."""
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -795,7 +786,6 @@ class ResendVerificationEmailView(APIView):
 
 
 class PasswordResetRequestView(APIView):
-    """Send a one-time reset code to the user's email."""
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -825,7 +815,6 @@ class PasswordResetRequestView(APIView):
 
 
 class PasswordResetConfirmView(APIView):
-    """Confirm a reset code and replace the user's password."""
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -867,12 +856,11 @@ class PasswordResetConfirmView(APIView):
         return Response({'message': 'Password reset successful. You can now log in.'})
 
 
-# ─── Stats ─────────────────────────────────────────────
+# ─── Stats 
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def platform_stats(request):
-    """General platform statistics - public endpoint."""
     return Response({
         'total_students': StudentProfile.objects.count(),
         'total_resources': Resource.objects.count(),
@@ -886,14 +874,12 @@ def platform_stats(request):
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def keep_alive(request):
-    """Lightweight health endpoint for uptime monitors."""
     return Response({'status': 'ok'})
 
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def whoami(request):
-    """Return basic authentication context for debugging auth flows."""
     user = request.user
     if not user or not user.is_authenticated:
         return Response({'authenticated': False, 'user': None})
@@ -910,7 +896,6 @@ def whoami(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def academic_status(request):
-    """Return whether the authenticated user's profile is academically complete."""
     user = request.user
     try:
         profile = user.profile

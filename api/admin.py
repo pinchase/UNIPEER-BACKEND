@@ -1,7 +1,3 @@
-"""
-UniPeer Admin Configuration.
-"""
-
 from django.contrib import admin
 from .models import (
     Skill, Course, StudentProfile, Resource,
