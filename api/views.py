@@ -793,7 +793,7 @@ class PasswordResetRequestView(APIView):
         if not email:
             return Response({'error': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = User.objects.filter(email__iexact(email).order_by('-id').first()
+        user = User.objects.filter(email__iexact=email).order_by('-id').first()
         if not user:
             return Response({'message': 'If an account exists, a password reset email has been sent.'})
 
