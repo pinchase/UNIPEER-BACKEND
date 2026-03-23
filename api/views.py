@@ -666,7 +666,7 @@ class LoginView(APIView):
         authenticated_user = None
         for candidate in candidates:
             matched = authenticate(username=candidate.username, password=password)
-            if matched:
+            if (matched):
                 authenticated_user = matched
                 break
 
@@ -702,13 +702,13 @@ class VerifyEmailView(APIView):
         if len(code) != 6:
             return Response({'error': 'Code must be 6 digits.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        users = User.objects.filter(email__iexact(email)).order_by('-id')
+        users = User.objects.filter(email__iexact=email).order_by('-id')
         if not users.exists():
             return Response({'error': 'Account not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         otp = (
             EmailVerificationCode.objects
-            .filter(user__email__iexact(email, code=code))
+            .filter(user__email__iexact=email, code=code)
             .select_related('user__profile')
             .order_by('-created_at')
             .first()
@@ -730,13 +730,13 @@ class VerifyEmailView(APIView):
             user.profile.save(update_fields=['email_verified'])
 
             # Keep one-time semantics strict if legacy duplicate-email records exist.
-            EmailVerificationCode.objects.filter(user__email__iexact(email)).delete()
+            EmailVerificationCode.objects.filter(user__email__iexact=email).delete()
 
             return Response({'message': 'Email verified successfully. You can now log in.'})
 
         latest_otp = (
             EmailVerificationCode.objects
-            .filter(user__email__iexact(email))
+            .filter(user__email__iexact=email)
             .order_by('-created_at')
             .first()
         )
@@ -761,7 +761,7 @@ class ResendVerificationEmailView(APIView):
         if not email:
             return Response({'error': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        users = list(User.objects.filter(email__iexact(email)).order_by('-id'))
+        users = list(User.objects.filter(email__iexact=email).order_by('-id'))
         if not users:
             return Response({'message': 'If the account exists, a verification email has been sent.'})
 
@@ -828,7 +828,7 @@ class PasswordResetConfirmView(APIView):
         if len(code) != 6 or not code.isdigit():
             return Response({'error': 'Code must be 6 digits.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = User.objects.filter(email__iexact(email)).order_by('-id').first()
+        user = User.objects.filter(email__iexact=email).order_by('-id').first()
         if not user:
             return Response({'error': 'Account not found.'}, status=status.HTTP_404_NOT_FOUND)
 
