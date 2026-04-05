@@ -14,6 +14,7 @@ router.register(r'matches', views.MatchViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('invites/', include('api.invite_urls')),
     path('register/', views.RegisterView.as_view(), name='register'),
     path('verify-email/', views.VerifyEmailView.as_view(), name='verify-email'),
     path('resend-verification/', views.ResendVerificationEmailView.as_view(), name='resend-verification'),

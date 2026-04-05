@@ -1,4 +1,4 @@
-from django.db import models
+from django.db import models, transaction
 from django.contrib.auth.models import User
 from django.utils import timezone
 from datetime import timedelta
@@ -266,3 +266,101 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"Notification for {self.recipient}: {self.message}"
+
+
+class MatchInvite(models.Model):
+    STATUS_PENDING = 'pending'
+    STATUS_ACCEPTED = 'accepted'
+    STATUS_DECLINED = 'declined'
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_ACCEPTED, 'Accepted'),
+        (STATUS_DECLINED, 'Declined'),
+    ]
+
+    sender = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name='sent_invites')
+    recipient = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name='received_invites')
+    related_match = models.ForeignKey(Match, on_delete=models.SET_NULL, null=True, blank=True, related_name='invites')
+    message = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['recipient', 'status', '-created_at']),
+            models.Index(fields=['sender', 'status', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"Invite {self.id}: {self.sender} -> {self.recipient} ({self.status})"
+
+    def accept(self, actor=None):
+        if self.status != self.STATUS_PENDING:
+            return self
+
+        from .views import get_or_create_direct_room
+
+        with transaction.atomic():
+            student_a, student_b = sorted(
+                [self.sender, self.recipient],
+                key=lambda profile: profile.id,
+            )
+
+            match = self.related_match
+            if not match:
+                match = Match.objects.filter(
+                    student_a=student_a,
+                    student_b=student_b,
+                ).first()
+
+            if match:
+                updated_fields = []
+                if match.status != 'accepted':
+                    match.status = 'accepted'
+                    updated_fields.append('status')
+                if not match.match_reason:
+                    match.match_reason = 'Accepted via invite'
+                    updated_fields.append('match_reason')
+                if updated_fields:
+                    match.save(update_fields=updated_fields)
+            else:
+                match = Match.objects.create(
+                    student_a=student_a,
+                    student_b=student_b,
+                    similarity_score=0.0,
+                    match_reason='Accepted via invite',
+                    status='accepted',
+                )
+
+            self.related_match = match
+            self.status = self.STATUS_ACCEPTED
+            self.responded_at = timezone.now()
+            self.save(update_fields=['related_match', 'status', 'responded_at'])
+
+            get_or_create_direct_room(self.sender, self.recipient)
+
+            Notification.objects.create(
+                recipient=self.sender,
+                message=f"{self.recipient.user.get_full_name() or self.recipient.user.username} accepted your invite.",
+                notification_type='match',
+            )
+
+        return self
+
+    def decline(self, actor=None):
+        if self.status != self.STATUS_PENDING:
+            return self
+
+        self.status = self.STATUS_DECLINED
+        self.responded_at = timezone.now()
+        self.save(update_fields=['status', 'responded_at'])
+
+        Notification.objects.create(
+            recipient=self.sender,
+            message=f"{self.recipient.user.get_full_name() or self.recipient.user.username} declined your invite.",
+            notification_type='match',
+        )
+        return self
