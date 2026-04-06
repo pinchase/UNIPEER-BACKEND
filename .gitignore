@@ -19,6 +19,8 @@ staticfiles/
 
 # Environment files
 *.pem
+ca.pem
+.codex
 .env
 .env.*
 .env.example
