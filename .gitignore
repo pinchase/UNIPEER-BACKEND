@@ -18,6 +18,7 @@ media/
 staticfiles/
 
 # Environment files
+.codex
 .env
 .env.*
 .env.example
