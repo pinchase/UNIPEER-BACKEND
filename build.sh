@@ -11,3 +11,6 @@ pip install -r requirements.txt
 echo "✅ Build completed successfully!"
 echo "⚠️  Note: Static files and migrations will run on startup"
 
+
+
+
