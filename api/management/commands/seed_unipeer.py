@@ -73,3 +73,5 @@ class Command(BaseCommand):
             profile.skills.set(random_skills)
 
         self.stdout.write(self.style.SUCCESS("50 student profiles created successfully"))
+
+        
