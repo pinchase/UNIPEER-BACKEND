@@ -19,3 +19,4 @@ dj-database-url
 uvicorn==0.35.0
 whitenoise
 resend
+Faker
