@@ -14,3 +14,4 @@ echo "⚠️  Note: Static files and migrations will run on startup"
 
 
 
+
