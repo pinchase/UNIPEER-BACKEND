@@ -5,6 +5,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.views import APIView
+from rest_framework.exceptions import PermissionDenied
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.conf import settings
@@ -437,18 +438,22 @@ class ResourceViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         uploader_profile_id = self.request.data.get('uploader_id')
         user = self.request.user
-        
+
+        if not user or not user.is_authenticated:
+            serializer.save()
+            return
+
         if uploader_profile_id:
             try:
-                profile = StudentProfile.objects.get(id=uploader_profile_id)
-                user = profile.user
-            except (StudentProfile.DoesNotExist, ValueError, TypeError):
-                pass
-                
-        if user and user.is_authenticated:
-            serializer.save(uploaded_by=user)
-        else:
-            serializer.save()
+                uploader_profile_id = int(uploader_profile_id)
+            except (TypeError, ValueError):
+                raise PermissionDenied('Invalid uploader profile.')
+
+            request_profile = getattr(user, 'profile', None)
+            if not request_profile or request_profile.id != uploader_profile_id:
+                raise PermissionDenied('You can only upload resources for your own profile.')
+
+        serializer.save(uploaded_by=user)
 
 
 class NotificationViewSet(viewsets.ModelViewSet):

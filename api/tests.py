@@ -1,8 +1,9 @@
 from django.contrib.auth.models import User
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import CollaborationRoom, Match, MatchInvite, Notification, StudentProfile
+from .models import CollaborationRoom, Match, MatchInvite, Notification, Resource, StudentProfile
 
 
 class MatchInviteAPITests(APITestCase):
@@ -130,3 +131,66 @@ class MatchInviteAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(MatchInvite.objects.count(), 0)
+
+
+class ResourceUploadAPITests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='resource-owner',
+            password='secret123',
+            email='owner@example.com',
+        )
+        self.profile = StudentProfile.objects.create(user=self.user, department='CS', year_of_study=2)
+
+        self.other_user = User.objects.create_user(
+            username='resource-other',
+            password='secret123',
+            email='other@example.com',
+        )
+        self.other_profile = StudentProfile.objects.create(user=self.other_user, department='Math', year_of_study=3)
+
+    def test_authenticated_user_can_upload_file_resource(self):
+        self.client.force_authenticate(user=self.user)
+
+        upload = SimpleUploadedFile(
+            'notes.txt',
+            b'Graph theory notes',
+            content_type='text/plain',
+        )
+
+        response = self.client.post(
+            '/api/resources/',
+            {
+                'title': 'Graph Theory Notes',
+                'description': 'Useful revision summary',
+                'resource_type': 'article',
+                'difficulty': 'beginner',
+                'file': upload,
+                'uploader_id': str(self.profile.id),
+            },
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        resource = Resource.objects.get()
+        self.assertEqual(resource.uploaded_by, self.user)
+        self.assertTrue(resource.file.name.endswith('notes.txt'))
+
+    def test_authenticated_user_cannot_spoof_uploader_profile(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            '/api/resources/',
+            {
+                'title': 'Spoofed Upload',
+                'description': 'Should be rejected',
+                'resource_type': 'article',
+                'difficulty': 'beginner',
+                'url': 'https://example.com/resource',
+                'uploader_id': str(self.other_profile.id),
+            },
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(Resource.objects.count(), 0)
