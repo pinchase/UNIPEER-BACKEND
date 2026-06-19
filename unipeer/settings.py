@@ -29,6 +29,7 @@ ALLOWED_HOSTS = env.list(
 # APPLICATIONS
 # -----------------------------
 INSTALLED_APPS = [
+    "jazzmin",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -36,7 +37,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "channels",
-    "corsheaders",  
+    "corsheaders",
     "rest_framework",
     "drf_spectacular",
     "api",
@@ -75,6 +76,25 @@ TEMPLATES = [
 ROOT_URLCONF = "unipeer.urls"
 ASGI_APPLICATION = "unipeer.asgi.application"
 WSGI_APPLICATION = "unipeer.wsgi.application"
+
+JAZZMIN_SETTINGS = {
+    "site_title": "UniPeer Admin",
+    "site_header": "UniPeer Admin",
+    "site_brand": "UniPeer",
+    "welcome_sign": "Welcome to UniPeer Admin",
+    "copyright": "UniPeer",
+    "show_sidebar": True,
+    "navigation_expanded": True,
+    "hide_apps": [],
+    "hide_models": [],
+    "order_with_respect_to": [],
+    "icons": {},
+}
+
+JAZZMIN_UI_TWEAKS = {
+    "theme": "darkly",
+    "dark_mode_theme": "darkly",
+}
 
 REDIS_URL = env("REDIS_URL", default="")
 

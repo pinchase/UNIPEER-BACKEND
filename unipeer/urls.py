@@ -4,6 +4,10 @@ from django.conf import settings
 from django.conf.urls.static import static
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
+admin.site.site_header = "UniPeer Admin"
+admin.site.site_title = "UniPeer Admin"
+admin.site.index_title = "Dashboard"
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('api.urls')),
