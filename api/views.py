@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from rest_framework import viewsets, status, generics
 from rest_framework.decorators import api_view, action
 from rest_framework.decorators import permission_classes
@@ -13,6 +15,7 @@ from django.shortcuts import get_object_or_404
 from django.db import models
 from django.core.exceptions import ValidationError
 from django.contrib.auth.password_validation import validate_password
+from django.utils import timezone
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -322,6 +325,65 @@ def send_password_reset_email(request, user, code):
 </html>"""
 
     _send_resend_email(user.email, subject, html_message, plain_message)
+
+
+def _build_engagement_trend(profile, days=7):
+    """Build a simple activity trend for the frontend dashboard."""
+    end_date = timezone.localdate(timezone.now())
+    start_date = end_date - timedelta(days=days - 1)
+    trend = []
+
+    for offset in range(days):
+        day = start_date + timedelta(days=offset)
+        day_start = datetime.combine(day, datetime.min.time())
+        day_end = day_start + timedelta(days=1)
+
+        messages = Message.objects.filter(
+            sender=profile,
+            timestamp__gte=day_start,
+            timestamp__lt=day_end,
+        )
+        active_users = messages.values('room').distinct().count()
+        trend.append({
+            'date': day.strftime('%a'),
+            'active_users': active_users,
+        })
+
+    return trend
+
+
+def _build_analytics_overview(profile):
+    """Build analytics data that matches the frontend contract."""
+    matches_made = Match.objects.filter(
+        models.Q(student_a=profile) | models.Q(student_b=profile),
+        status='accepted'
+    ).count()
+    messages_sent = Message.objects.filter(sender=profile).count()
+    uploaded_resources = Resource.objects.filter(uploaded_by=profile.user).count()
+
+    skill_usage = {}
+    for resource in Resource.objects.filter(uploaded_by=profile.user).prefetch_related('related_skills'):
+        for skill in resource.related_skills.all():
+            skill_usage[skill.name] = skill_usage.get(skill.name, 0) + 1
+    for skill in profile.skills.all():
+        skill_usage[skill.name] = skill_usage.get(skill.name, 0) + 1
+
+    most_used_skills = [
+        {'skill': skill_name, 'count': count}
+        for skill_name, count in sorted(
+            skill_usage.items(),
+            key=lambda item: (-item[1], item[0])
+        )[:5]
+    ]
+
+    overview = {
+        'user_activity': messages_sent + matches_made + uploaded_resources,
+        'matches_made': matches_made,
+        'messages_sent': messages_sent,
+        'most_used_skills': most_used_skills,
+        'engagement_trend': _build_engagement_trend(profile),
+    }
+    return overview
 
 
 # ─── Viewsets 
@@ -859,6 +921,51 @@ class PasswordResetConfirmView(APIView):
         reset.delete()
 
         return Response({'message': 'Password reset successful. You can now log in.'})
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def analytics_overview(request):
+    profile_id = request.query_params.get('profile_id')
+    if not profile_id:
+        return Response({'error': 'profile_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        profile = StudentProfile.objects.select_related('user').get(id=int(profile_id))
+    except (TypeError, ValueError, StudentProfile.DoesNotExist):
+        return Response({'error': 'Invalid profile_id'}, status=status.HTTP_404_NOT_FOUND)
+
+    overview = _build_analytics_overview(profile)
+    return Response({'overview': overview})
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def analytics_export(request):
+    profile_id = request.data.get('profile_id')
+    export_format = (request.data.get('format') or 'json').lower()
+
+    if export_format not in ('csv', 'json'):
+        export_format = 'json'
+
+    if not profile_id:
+        return Response({'error': 'profile_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        profile = StudentProfile.objects.select_related('user').get(id=int(profile_id))
+    except (TypeError, ValueError, StudentProfile.DoesNotExist):
+        return Response({'error': 'Invalid profile_id'}, status=status.HTTP_404_NOT_FOUND)
+
+    overview = _build_analytics_overview(profile)
+    download_url = request.build_absolute_uri(
+        f"/api/analytics/export/?profile_id={profile.id}&format={export_format}"
+    )
+
+    return Response({
+        'download_url': download_url,
+        'format': export_format,
+        'overview': overview,
+    })
 
 
 # ─── Stats 

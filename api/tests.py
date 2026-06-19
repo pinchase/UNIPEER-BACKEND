@@ -1,9 +1,10 @@
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import CollaborationRoom, Match, MatchInvite, Notification, Resource, StudentProfile
+from .models import CollaborationRoom, Match, MatchInvite, Message, Notification, Resource, Skill, StudentProfile
 
 
 class MatchInviteAPITests(APITestCase):
@@ -131,6 +132,72 @@ class MatchInviteAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(MatchInvite.objects.count(), 0)
+
+
+class AnalyticsAPITests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='analytics-user',
+            password='secret123',
+            email='analytics@example.com',
+        )
+        self.profile = StudentProfile.objects.create(
+            user=self.user,
+            department='CS',
+            year_of_study=3,
+        )
+
+        self.other_user = User.objects.create_user(
+            username='analytics-other',
+            password='secret123',
+            email='otheranalytics@example.com',
+        )
+        self.other_profile = StudentProfile.objects.create(
+            user=self.other_user,
+            department='Math',
+            year_of_study=2,
+        )
+
+        self.python = Skill.objects.create(name='Python')
+        self.js = Skill.objects.create(name='JavaScript')
+        self.profile.skills.add(self.python, self.js)
+        self.other_profile.skills.add(self.python)
+
+        self.room = CollaborationRoom.objects.create(name='Analytics Room', room_type='study')
+        self.room.members.add(self.profile, self.other_profile)
+
+        Message.objects.create(room=self.room, sender=self.profile, content='Hello there', timestamp=timezone.now())
+        Message.objects.create(room=self.room, sender=self.profile, content='Second message', timestamp=timezone.now())
+        Message.objects.create(room=self.room, sender=self.other_profile, content='Reply', timestamp=timezone.now())
+
+        self.match = Match.objects.create(
+            student_a=self.profile,
+            student_b=self.other_profile,
+            similarity_score=0.95,
+            match_reason='Strong overlap',
+            status='accepted'
+        )
+
+    def test_overview_endpoint_returns_expected_analytics_shape(self):
+        response = self.client.get('/api/analytics/overview/', {'profile_id': self.profile.id})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('overview', response.data)
+        self.assertEqual(response.data['overview']['matches_made'], 1)
+        self.assertEqual(response.data['overview']['messages_sent'], 2)
+        self.assertIn('most_used_skills', response.data['overview'])
+        self.assertIn('engagement_trend', response.data['overview'])
+
+    def test_export_endpoint_returns_json_download_payload(self):
+        response = self.client.post(
+            '/api/analytics/export/',
+            {'profile_id': self.profile.id, 'format': 'json'},
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('download_url', response.data)
+        self.assertIn('overview', response.data)
 
 
 class ResourceUploadAPITests(APITestCase):
