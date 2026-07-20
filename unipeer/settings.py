@@ -119,7 +119,9 @@ DATABASE_URL = env("DATABASE_URL", default=None)
 
 if DATABASE_URL:
     DATABASES = {
-        "default": env.db("DATABASE_URL")
+        "default": env.db("DATABASE_URL"),
+        "conn_max_age": 600,
+        "ssl_require": True,
     }
     if DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql":
         DATABASES["default"]["OPTIONS"] = {"sslmode": "require"}
