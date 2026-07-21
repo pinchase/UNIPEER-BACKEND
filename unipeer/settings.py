@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import sys
 import environ
 from datetime import timedelta
 
@@ -164,7 +165,7 @@ MEDIA_ROOT = BASE_DIR / "media"
 # DJANGO REST FRAMEWORK
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "api.authentication.CookieJWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
@@ -243,13 +244,14 @@ if VERCEL_ORIGIN_REGEX and VERCEL_ORIGIN_REGEX not in CORS_ALLOWED_ORIGIN_REGEXE
     CORS_ALLOWED_ORIGIN_REGEXES.insert(0, VERCEL_ORIGIN_REGEX)
 
 # Allow configuring whether credentials (cookies) are accepted from the frontend.
-CORS_ALLOW_CREDENTIALS = env.bool("CORS_ALLOW_CREDENTIALS", default=False)
+CORS_ALLOW_CREDENTIALS = env.bool("CORS_ALLOW_CREDENTIALS", default=True)
+CORS_PREFLIGHT_MAX_AGE = 600
 
 # SECURITY SETTINGS
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-SECURE_SSL_REDIRECT = not DEBUG
-SESSION_COOKIE_SECURE = not DEBUG
-CSRF_COOKIE_SECURE = not DEBUG
+SECURE_SSL_REDIRECT = not DEBUG and 'test' not in sys.argv
+SESSION_COOKIE_SECURE = not DEBUG and 'test' not in sys.argv
+CSRF_COOKIE_SECURE = not DEBUG and 'test' not in sys.argv
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 
@@ -261,8 +263,22 @@ if not DEBUG:
 
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SECURE = not DEBUG
+SECURE_REFERRER_POLICY = 'same-origin'
+SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
+SECURE_HSTS_PRELOAD = not DEBUG
+CONTENT_SECURITY_POLICY = {
+    "default-src": ["'self'"],
+    "img-src": ["'self'", "data:", "https:"],
+    "script-src": ["'self'"],
+    "style-src": ["'self'", "'unsafe-inline'"],
+    "connect-src": ["'self'", "wss:", "https:"],
+    "frame-ancestors": ["'none'"],
+}
 
 CSRF_TRUSTED_ORIGINS = [
     "https://unipeer-frontend.vercel.app",

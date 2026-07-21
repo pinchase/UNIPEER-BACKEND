@@ -9,14 +9,14 @@ from channels.security.websocket import AllowedHostsOriginValidator
 from django.core.asgi import get_asgi_application
 
 from api.routing import websocket_urlpatterns
-from api.ws_auth import QueryStringJWTAuthMiddlewareStack
+from api.ws_auth import CookieJWTAuthMiddlewareStack
 
 django_asgi_app = get_asgi_application()
 
 application = ProtocolTypeRouter({
 	'http': django_asgi_app,
 	'websocket': AllowedHostsOriginValidator(
-		QueryStringJWTAuthMiddlewareStack(
+		CookieJWTAuthMiddlewareStack(
 			URLRouter(websocket_urlpatterns)
 		)
 	),

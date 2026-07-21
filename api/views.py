@@ -1,8 +1,12 @@
 from datetime import datetime, timedelta
+import sys
+import uuid
 
 from rest_framework import viewsets, status, generics
 from rest_framework.decorators import api_view, action
 from rest_framework.decorators import permission_classes
+from django.views.decorators.csrf import ensure_csrf_cookie
+from django.middleware.csrf import get_token
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -11,6 +15,7 @@ from rest_framework.exceptions import PermissionDenied
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.conf import settings
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.db import models
 from django.core.exceptions import ValidationError
@@ -18,12 +23,13 @@ from django.contrib.auth.password_validation import validate_password
 from django.utils import timezone
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.tokens import RefreshToken, AccessToken, TokenError
 
 from .models import (
     Skill, Course, StudentProfile, Resource,
     Match, CollaborationRoom, Message, Notification,
-    EmailVerificationCode, PasswordResetCode
+    EmailVerificationCode, PasswordResetCode, RefreshTokenRecord
 )
 from .serializers import (
     SkillSerializer, CourseSerializer, StudentProfileSerializer,
@@ -34,6 +40,82 @@ from .serializers import (
 )
 from .ml_engine import StudentMatcher, ResourceRecommender
 from .throttles import NotificationAnonThrottle, NotificationBurstThrottle, NotificationUserThrottle
+
+
+def _build_cookie_response(payload=None, status_code=status.HTTP_200_OK):
+    response = Response(payload, status=status_code)
+    return response
+
+
+def _set_auth_cookies(response, access_token, refresh_token, access_ttl_seconds=900, refresh_ttl_seconds=60 * 60 * 24 * 7):
+    response.set_cookie(
+        key='unipeer_access',
+        value=access_token,
+        httponly=True,
+        secure=not settings.DEBUG and 'test' not in sys.argv,
+        samesite='Lax',
+        max_age=access_ttl_seconds,
+        path='/',
+    )
+    response.set_cookie(
+        key='unipeer_refresh',
+        value=refresh_token,
+        httponly=True,
+        secure=not settings.DEBUG and 'test' not in sys.argv,
+        samesite='Lax',
+        max_age=refresh_ttl_seconds,
+        path='/',
+    )
+    return response
+
+
+def _clear_auth_cookies(response):
+    response.delete_cookie('unipeer_access', path='/')
+    response.delete_cookie('unipeer_refresh', path='/')
+    return response
+
+
+def _create_refresh_record(user, refresh_token, family=None):
+    expires_at = timezone.now() + settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME']
+    return RefreshTokenRecord.objects.create(
+        user=user,
+        jti=refresh_token['jti'],
+        family=family or refresh_token['jti'],
+        expires_at=expires_at,
+    )
+
+
+def _get_refresh_record_from_cookie(request):
+    token_value = request.COOKIES.get('unipeer_refresh')
+    if not token_value:
+        return None, None
+    try:
+        token = RefreshToken(token_value)
+    except Exception:
+        return None, None
+    record = RefreshTokenRecord.objects.filter(jti=token['jti']).first()
+    return token, record
+
+
+def _get_user_from_request(request):
+    auth_header = request.headers.get('Authorization', '')
+    if auth_header.startswith('Bearer '):
+        try:
+            validated = JWTAuthentication().get_validated_token(auth_header.split(' ', 1)[1])
+            user = JWTAuthentication().get_user(validated)
+            return user
+        except Exception:
+            return None
+    access_cookie = request.COOKIES.get('unipeer_access')
+    if access_cookie:
+        try:
+            validated = AccessToken(access_cookie)
+            user_id = validated.get('user_id')
+            if user_id:
+                return User.objects.filter(id=user_id).first()
+        except Exception:
+            return None
+    return None
 
 
 def sync_suggested_matches_for_profile(profile, top_n=10):
@@ -733,7 +815,7 @@ class LoginView(APIView):
         authenticated_user = None
         for candidate in candidates:
             matched = authenticate(username=candidate.username, password=password)
-            if (matched):
+            if matched:
                 authenticated_user = matched
                 break
 
@@ -746,13 +828,63 @@ class LoginView(APIView):
                     {'error': 'Email not verified. Please verify your email before logging in.'},
                     status=status.HTTP_403_FORBIDDEN,
                 )
+
             refresh = RefreshToken.for_user(authenticated_user)
-            return Response({
+            refresh_record = _create_refresh_record(authenticated_user, refresh)
+            response = Response({
                 'profile': StudentProfileSerializer(authenticated_user.profile, context={'request': request}).data,
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
+                'message': 'Authenticated successfully.',
             })
+            _set_auth_cookies(response, str(refresh.access_token), str(refresh), access_ttl_seconds=15 * 60, refresh_ttl_seconds=60 * 60 * 24 * 7)
+            return response
         return Response({'error': 'Invalid credentials'}, status=401)
+
+
+class RefreshTokenView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        token, record = _get_refresh_record_from_cookie(request)
+        if not token or not record:
+            return Response({'error': 'Refresh token missing or invalid.'}, status=401)
+        if record.revoked or record.used or record.expires_at <= timezone.now():
+            return Response({'error': 'Refresh token is no longer valid.'}, status=401)
+
+        try:
+            token.verify()
+        except Exception:
+            return Response({'error': 'Refresh token is invalid.'}, status=401)
+
+        record.used = True
+        record.revoked = True
+        record.save(update_fields=['used', 'revoked'])
+
+        user = record.user
+        rotated_refresh = RefreshToken.for_user(user)
+        rotated_record = _create_refresh_record(user, rotated_refresh, family=record.family)
+        response = Response({'message': 'Token refreshed successfully.'})
+        _set_auth_cookies(response, str(rotated_refresh.access_token), str(rotated_refresh), access_ttl_seconds=15 * 60, refresh_ttl_seconds=60 * 60 * 24 * 7)
+        return response
+
+
+class LogoutView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        token, record = _get_refresh_record_from_cookie(request)
+        if record:
+            record.revoked = True
+            record.used = True
+            record.save(update_fields=['revoked', 'used'])
+        response = Response({'message': 'Logged out successfully.'})
+        _clear_auth_cookies(response)
+        return response
+
+
+@ensure_csrf_cookie
+def csrf_cookie(request):
+    get_token(request)
+    return Response({'message': 'CSRF cookie set.'})
 
 
 class VerifyEmailView(APIView):
