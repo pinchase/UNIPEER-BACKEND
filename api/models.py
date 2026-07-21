@@ -3,6 +3,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from datetime import timedelta
 import json
+import uuid
 
 
 class Skill(models.Model):
@@ -244,6 +245,25 @@ class PasswordResetCode(models.Model):
 
     def __str__(self):
         return f"Password reset code for {self.user.username}"
+
+
+class RefreshTokenRecord(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='refresh_tokens')
+    jti = models.CharField(max_length=255, unique=True)
+    family = models.CharField(max_length=255, default=uuid.uuid4().hex)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    revoked = models.BooleanField(default=False)
+    used = models.BooleanField(default=False)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['user', 'revoked']),
+            models.Index(fields=['family']),
+        ]
+
+    def __str__(self):
+        return f"Refresh token {self.jti[:12]}"
 
 
 class Notification(models.Model):

@@ -1,10 +1,14 @@
+import asyncio
+
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import SimpleTestCase
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from .models import CollaborationRoom, Match, MatchInvite, Message, Notification, Resource, Skill, StudentProfile
+from .ws_auth import CookieJWTAuthMiddleware
 
 
 class MatchInviteAPITests(APITestCase):
@@ -132,6 +136,62 @@ class MatchInviteAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(MatchInvite.objects.count(), 0)
+
+
+class AuthCookieAPITests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='auth-user',
+            password='secret123',
+            email='auth@example.com',
+        )
+        self.profile = StudentProfile.objects.create(user=self.user, department='CS', year_of_study=2, email_verified=True)
+
+    def test_login_sets_http_only_cookies_and_refresh_rotates(self):
+        response = self.client.post('/api/login/', {'email': 'auth@example.com', 'password': 'secret123'}, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('unipeer_access', response.cookies)
+        self.assertIn('unipeer_refresh', response.cookies)
+        self.assertTrue(response.cookies['unipeer_access']['httponly'])
+        self.assertTrue(response.cookies['unipeer_refresh']['httponly'])
+
+        refresh_cookie = response.cookies['unipeer_refresh'].value
+        refresh_response = self.client.post('/api/token/refresh/', format='json')
+
+        self.assertEqual(refresh_response.status_code, status.HTTP_200_OK)
+        self.assertIn('unipeer_access', refresh_response.cookies)
+        self.assertIn('unipeer_refresh', refresh_response.cookies)
+        self.assertNotEqual(refresh_cookie, refresh_response.cookies['unipeer_refresh'].value)
+
+    def test_logout_clears_cookies_and_revokes_refresh_tokens(self):
+        self.client.post('/api/login/', {'email': 'auth@example.com', 'password': 'secret123'}, format='json')
+
+        response = self.client.post('/api/logout/', format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.cookies['unipeer_access']['max-age'], 0)
+        self.assertEqual(response.cookies['unipeer_refresh']['max-age'], 0)
+
+
+class CookieAuthMiddlewareTests(SimpleTestCase):
+    def test_middleware_reads_access_cookie_for_websocket_scope(self):
+        async def run_test():
+            class DummyInner:
+                async def __call__(self, scope, receive, send):
+                    return scope['user']
+
+            middleware = CookieJWTAuthMiddleware(DummyInner())
+            scope = {
+                'type': 'websocket',
+                'query_string': b'',
+                'headers': [],
+                'cookies': {'unipeer_access': 'not-a-real-token'},
+            }
+            result = await middleware(scope, None, None)
+            self.assertEqual(result.__class__.__name__, 'AnonymousUser')
+
+        asyncio.run(run_test())
 
 
 class AnalyticsAPITests(APITestCase):
