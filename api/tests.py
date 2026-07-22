@@ -7,8 +7,9 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import CollaborationRoom, Match, MatchInvite, Message, Notification, Resource, Skill, StudentProfile
+from .models import CollaborationRoom, Course, Match, MatchInvite, Message, Notification, Resource, Skill, StudentProfile
 from .ws_auth import CookieJWTAuthMiddleware
+from .ml_engine import StudentMatcher, ResourceRecommender
 
 
 class MatchInviteAPITests(APITestCase):
@@ -241,6 +242,63 @@ class AdminAnalyticsAPITests(APITestCase):
         self.assertEqual(export_response.status_code, status.HTTP_200_OK)
         self.assertIn('csv', export_response.data)
         self.assertIn('download_url', export_response.data)
+
+
+class RecommendationEngineTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='reco-user', password='secret123', email='reco@example.com')
+        self.profile = StudentProfile.objects.create(user=self.user, department='CS', year_of_study=2, email_verified=True)
+        self.target_profile = StudentProfile.objects.create(user=User.objects.create_user(username='target-user', password='secret123', email='target@example.com'), department='CS', year_of_study=2, email_verified=True)
+
+        self.python = Skill.objects.create(name='Python')
+        self.django = Skill.objects.create(name='Django')
+        self.backend = Skill.objects.create(name='Backend Development')
+        self.math = Skill.objects.create(name='Mathematics')
+
+        self.course_a = Course.objects.create(code='CS101', name='Intro to Programming', department='CS', level=100)
+        self.course_b = Course.objects.create(code='CS201', name='Web Development', department='CS', level=200)
+
+        self.profile.skills.add(self.python, self.django)
+        self.profile.courses.add(self.course_a, self.course_b)
+        self.profile.interests = 'backend web development, python, django'
+        self.profile.save()
+
+        self.target_profile.skills.add(self.python, self.backend)
+        self.target_profile.courses.add(self.course_a)
+        self.target_profile.interests = 'backend web development, django, apis'
+        self.target_profile.save()
+
+        self.resource = Resource.objects.create(
+            title='Django Backend Guide',
+            description='Backend web development using Django and Python.',
+            resource_type='article',
+            difficulty='beginner',
+            uploaded_by=self.user,
+            rating=4.5,
+            view_count=120,
+        )
+        self.resource.related_skills.add(self.python, self.django)
+        self.resource.related_courses.add(self.course_b)
+
+    def test_student_matcher_returns_explainable_results(self):
+        matcher = StudentMatcher()
+        results = matcher.compute_matches(self.profile, StudentProfile.objects.all(), top_n=3, min_score=0.1)
+
+        self.assertTrue(results)
+        candidate, score, reasons = results[0]
+        self.assertGreaterEqual(score, 0.0)
+        self.assertIn(candidate, StudentProfile.objects.exclude(id=self.profile.id))
+        self.assertTrue(reasons)
+        self.assertTrue(any(word in reasons.lower() for word in ['skill', 'course', 'department', 'schedule', 'interest']))
+
+    def test_resource_recommender_returns_ranked_results(self):
+        recommender = ResourceRecommender()
+        results = recommender.recommend(self.profile, [self.resource], top_n=3)
+
+        self.assertTrue(results)
+        recommended_resource, score = results[0]
+        self.assertEqual(recommended_resource.id, self.resource.id)
+        self.assertGreaterEqual(score, 0.0)
 
 
 class AnalyticsAPITests(APITestCase):
