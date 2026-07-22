@@ -4,6 +4,7 @@ from .models import (
     Skill, Course, StudentProfile, Resource,
     Match, CollaborationRoom, Message, Notification, Badge
 )
+from .services.google_auth import GoogleOAuthService
 
 
 class SkillSerializer(serializers.ModelSerializer):
@@ -22,6 +23,27 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['id', 'username', 'first_name', 'last_name', 'email']
+
+
+class GoogleAuthSerializer(serializers.Serializer):
+    """Validate Google login payloads and verify the supplied ID token."""
+
+    token = serializers.CharField(required=True, allow_blank=False)
+
+    def validate(self, attrs):
+        token = (attrs.get('token') or '').strip()
+        if not token:
+            raise serializers.ValidationError({'token': 'A Google token is required.'})
+
+        service = GoogleOAuthService()
+        try:
+            attrs['profile_payload'] = service.verify_token(token)
+        except ValueError as exc:
+            raise serializers.ValidationError({'token': str(exc)}) from exc
+        except Exception:
+            raise serializers.ValidationError({'token': 'Unable to verify Google token.'})
+
+        return attrs
 
 
 class BadgeSerializer(serializers.ModelSerializer):

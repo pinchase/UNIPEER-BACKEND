@@ -1,4 +1,5 @@
 import asyncio
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -193,6 +194,61 @@ class CookieAuthMiddlewareTests(SimpleTestCase):
             self.assertEqual(result.__class__.__name__, 'AnonymousUser')
 
         asyncio.run(run_test())
+
+
+class GoogleAuthAPITests(APITestCase):
+    def setUp(self):
+        self.profile_user = User.objects.create_user(
+            username='google-user',
+            password='secret123',
+            email='google@example.com',
+        )
+        self.profile = StudentProfile.objects.create(user=self.profile_user, department='CS', year_of_study=2, email_verified=False)
+
+    @patch('api.services.google_auth.GoogleOAuthService.verify_token')
+    def test_existing_user_can_sign_in_with_google_and_receive_cookies(self, mock_verify_token):
+        mock_verify_token.return_value = {
+            'email': 'google@example.com',
+            'given_name': 'Google',
+            'family_name': 'User',
+            'picture': 'https://example.com/avatar.png',
+        }
+
+        response = self.client.post('/api/auth/google/', {'token': 'mock-google-token'}, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('unipeer_access', response.cookies)
+        self.assertIn('unipeer_refresh', response.cookies)
+        self.assertEqual(response.data['user']['email'], 'google@example.com')
+        self.profile.refresh_from_db()
+        self.assertTrue(self.profile.email_verified)
+
+    @patch('api.services.google_auth.GoogleOAuthService.verify_token')
+    def test_new_user_is_created_from_google_profile(self, mock_verify_token):
+        mock_verify_token.return_value = {
+            'email': 'new-google@example.com',
+            'given_name': 'New',
+            'family_name': 'User',
+            'picture': 'https://example.com/avatar.png',
+        }
+
+        response = self.client.post('/api/auth/google/', {'token': 'mock-google-token'}, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        user = User.objects.get(email='new-google@example.com')
+        self.assertTrue(user.profile.email_verified)
+        self.assertEqual(user.first_name, 'New')
+        self.assertEqual(user.last_name, 'User')
+        self.assertIn('unipeer_access', response.cookies)
+
+    @patch('api.services.google_auth.GoogleOAuthService.verify_token')
+    def test_invalid_google_token_returns_unauthorized(self, mock_verify_token):
+        mock_verify_token.side_effect = ValueError('invalid_token')
+
+        response = self.client.post('/api/auth/google/', {'token': 'bad-token'}, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertIn('error', response.data)
 
 
 class AdminAnalyticsAPITests(APITestCase):

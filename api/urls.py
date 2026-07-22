@@ -20,6 +20,7 @@ urlpatterns = [
     path('password-reset/request/', views.PasswordResetRequestView.as_view(), name='password-reset-request'),
     path('password-reset/confirm/', views.PasswordResetConfirmView.as_view(), name='password-reset-confirm'),
     path('login/', views.LoginView.as_view(), name='login'),
+    path('auth/google/', views.GoogleAuthView.as_view(), name='google-auth'),
     path('token/refresh/', views.RefreshTokenView.as_view(), name='token_refresh'),
     path('logout/', views.LogoutView.as_view(), name='logout'),
     path('csrf/', views.csrf_cookie, name='csrf-cookie'),
