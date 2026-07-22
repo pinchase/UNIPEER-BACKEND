@@ -20,6 +20,8 @@ if env_file.exists():
 SECRET_KEY = env("SECRET_KEY")
 
 DEBUG = env.bool("DEBUG", default=False)
+GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", default="")
+GOOGLE_CLIENT_SECRET = env("GOOGLE_CLIENT_SECRET", default="")
 
 ALLOWED_HOSTS = env.list(
     "ALLOWED_HOSTS",
@@ -37,10 +39,17 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.sites",
     "channels",
     "corsheaders",
     "rest_framework",
     "drf_spectacular",
+    "allauth",
+    "allauth.account",
+    "allauth.socialaccount",
+    "allauth.socialaccount.providers.google",
+    "dj_rest_auth",
+    "dj_rest_auth.registration",
     "api",
 ]
 
@@ -54,6 +63,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "allauth.account.middleware.AccountMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
@@ -77,6 +87,30 @@ TEMPLATES = [
 ROOT_URLCONF = "unipeer.urls"
 ASGI_APPLICATION = "unipeer.asgi.application"
 WSGI_APPLICATION = "unipeer.wsgi.application"
+
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+    "allauth.account.auth_backends.AuthenticationBackend",
+]
+
+SITE_ID = 1
+
+ACCOUNT_AUTHENTICATION_METHOD = "email"
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_USERNAME_REQUIRED = False
+ACCOUNT_EMAIL_VERIFICATION = "optional"
+
+SOCIALACCOUNT_PROVIDERS = {
+    "google": {
+        "SCOPE": ["profile", "email"],
+        "AUTH_PARAMS": {"access_type": "online"},
+        "APP": {
+            "client_id": GOOGLE_CLIENT_ID,
+            "secret": GOOGLE_CLIENT_SECRET,
+            "key": "",
+        },
+    }
+}
 
 JAZZMIN_SETTINGS = {
     "site_title": "UniPeer Admin",

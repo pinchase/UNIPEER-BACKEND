@@ -36,11 +36,13 @@ from .serializers import (
     StudentProfileCreateSerializer, ResourceSerializer,
     MatchSerializer, MatchResultSerializer,
     ResourceRecommendationSerializer, CollaborationRoomSerializer,
-    MessageSerializer, DashboardSerializer, NotificationSerializer
+    MessageSerializer, DashboardSerializer, NotificationSerializer,
+    GoogleAuthSerializer
 )
 from .ml_engine import StudentMatcher, ResourceRecommender
 from .throttles import NotificationAnonThrottle, NotificationBurstThrottle, NotificationUserThrottle
 from .permissions import IsAdminOrStaff
+from .services.google_auth import GoogleOAuthService
 
 
 def _build_cookie_response(payload=None, status_code=status.HTTP_200_OK):
@@ -839,6 +841,47 @@ class LoginView(APIView):
             _set_auth_cookies(response, str(refresh.access_token), str(refresh), access_ttl_seconds=15 * 60, refresh_ttl_seconds=60 * 60 * 24 * 7)
             return response
         return Response({'error': 'Invalid credentials'}, status=401)
+
+
+class GoogleAuthView(APIView):
+    """Authenticate a user with a Google ID token and issue the existing cookie-based session."""
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = GoogleAuthSerializer(data=request.data)
+        if not serializer.is_valid():
+            token_errors = serializer.errors.get('token', [])
+            if token_errors:
+                return Response({'error': token_errors[0]}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        token = serializer.validated_data['token']
+        service = GoogleOAuthService()
+        try:
+            user, profile = service.authenticate(token)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            return Response({'error': 'Unable to authenticate with Google.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        refresh = RefreshToken.for_user(user)
+        _create_refresh_record(user, refresh)
+        response_payload = {
+            'success': True,
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'email': user.email,
+                'profile': StudentProfileSerializer(profile, context={'request': request}).data,
+            },
+            'message': 'Authenticated successfully.',
+        }
+        response = Response(response_payload)
+        _set_auth_cookies(response, str(refresh.access_token), str(refresh), access_ttl_seconds=15 * 60, refresh_ttl_seconds=60 * 60 * 24 * 7)
+        return response
 
 
 class RefreshTokenView(APIView):
