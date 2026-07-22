@@ -194,6 +194,55 @@ class CookieAuthMiddlewareTests(SimpleTestCase):
         asyncio.run(run_test())
 
 
+class AdminAnalyticsAPITests(APITestCase):
+    def setUp(self):
+        self.admin_user = User.objects.create_user(
+            username='admin-user',
+            password='secret123',
+            email='admin@example.com',
+            is_staff=True,
+            is_superuser=True,
+        )
+        self.admin_profile = StudentProfile.objects.create(user=self.admin_user, department='CS', year_of_study=4, email_verified=True)
+
+        self.regular_user = User.objects.create_user(
+            username='regular-user',
+            password='secret123',
+            email='regular@example.com',
+        )
+        self.regular_profile = StudentProfile.objects.create(user=self.regular_user, department='Math', year_of_study=2, email_verified=True)
+
+    def test_profile_payload_includes_admin_flag(self):
+        response = self.client.get(f'/api/profiles/{self.admin_profile.id}/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['is_admin'])
+        self.assertEqual(response.data['role'], 'admin')
+
+        dashboard_response = self.client.get(f'/api/profiles/{self.admin_profile.id}/dashboard/')
+        self.assertEqual(dashboard_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(dashboard_response.data['profile']['is_admin'])
+
+    def test_non_admin_cannot_access_analytics_overview(self):
+        self.client.force_authenticate(user=self.regular_user)
+        response = self.client.get('/api/analytics/overview/', {'profile_id': self.admin_profile.id})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_can_access_analytics_overview_and_export(self):
+        self.client.force_authenticate(user=self.admin_user)
+
+        overview_response = self.client.get('/api/analytics/overview/', {'profile_id': self.admin_profile.id})
+        self.assertEqual(overview_response.status_code, status.HTTP_200_OK)
+        self.assertIn('overview', overview_response.data)
+        self.assertIn('user_activity', overview_response.data['overview'])
+        self.assertIn('most_used_skills', overview_response.data['overview'])
+        self.assertIn('engagement_trend', overview_response.data['overview'])
+
+        export_response = self.client.post('/api/analytics/export/', {'profile_id': self.admin_profile.id, 'format': 'csv'}, format='json')
+        self.assertEqual(export_response.status_code, status.HTTP_200_OK)
+        self.assertIn('csv', export_response.data)
+        self.assertIn('download_url', export_response.data)
+
+
 class AnalyticsAPITests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(

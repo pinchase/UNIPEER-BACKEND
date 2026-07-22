@@ -50,6 +50,8 @@ class StudentProfileSerializer(serializers.ModelSerializer):
     display_name = serializers.SerializerMethodField()
     name = serializers.SerializerMethodField()
     match_score = serializers.SerializerMethodField()
+    is_admin = serializers.SerializerMethodField()
+    role = serializers.SerializerMethodField()
 
     class Meta:
         model = StudentProfile
@@ -61,7 +63,7 @@ class StudentProfileSerializer(serializers.ModelSerializer):
             'first_name', 'last_name', 'email',
             'available_hours_per_week', 'preferred_time',
             'total_xp', 'current_level', 'badges',
-            'created_at', 'updated_at', 'match_score',
+            'created_at', 'updated_at', 'match_score', 'is_admin', 'role',
         ]
 
     def _can_view_personal(self, obj):
@@ -93,6 +95,13 @@ class StudentProfileSerializer(serializers.ModelSerializer):
         if score is None:
             score = self.context.get('match_score')
         return round(score, 3) if score is not None else None
+
+    def get_is_admin(self, obj):
+        user = getattr(obj, 'user', None)
+        return bool(getattr(user, 'is_staff', False)) or bool(getattr(user, 'is_superuser', False))
+
+    def get_role(self, obj):
+        return 'admin' if self.get_is_admin(obj) else 'user'
 
     def update(self, instance, validated_data):
         user = instance.user

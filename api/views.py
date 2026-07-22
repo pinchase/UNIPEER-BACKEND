@@ -40,6 +40,7 @@ from .serializers import (
 )
 from .ml_engine import StudentMatcher, ResourceRecommender
 from .throttles import NotificationAnonThrottle, NotificationBurstThrottle, NotificationUserThrottle
+from .permissions import IsAdminOrStaff
 
 
 def _build_cookie_response(payload=None, status_code=status.HTTP_200_OK):
@@ -1056,7 +1057,7 @@ class PasswordResetConfirmView(APIView):
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])
+@permission_classes([IsAdminOrStaff])
 def analytics_overview(request):
     profile_id = request.query_params.get('profile_id')
     if not profile_id:
@@ -1072,7 +1073,7 @@ def analytics_overview(request):
 
 
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([IsAdminOrStaff])
 def analytics_export(request):
     profile_id = request.data.get('profile_id')
     export_format = (request.data.get('format') or 'json').lower()
@@ -1093,11 +1094,14 @@ def analytics_export(request):
         f"/api/analytics/export/?profile_id={profile.id}&format={export_format}"
     )
 
-    return Response({
+    response_payload = {
         'download_url': download_url,
         'format': export_format,
         'overview': overview,
-    })
+    }
+    if export_format == 'csv':
+        response_payload['csv'] = overview
+    return Response(response_payload)
 
 
 # ─── Stats 
