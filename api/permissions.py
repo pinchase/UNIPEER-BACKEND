@@ -48,3 +48,10 @@ class IsMatchParticipant(permissions.BasePermission):
         except:
             return False
 
+
+class IsAdminOrStaff(permissions.BasePermission):
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        return bool(getattr(request.user, 'is_staff', False)) or bool(getattr(request.user, 'is_superuser', False))
+
