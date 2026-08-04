@@ -13,6 +13,10 @@ from api.models import StudentProfile
 logger = logging.getLogger(__name__)
 
 
+class GoogleAccountNotEligibleError(Exception):
+    """Raised when a Google-authenticated user cannot sign in because no linked UniPeer account exists."""
+
+
 class GoogleOAuthService:
     """Verify Google ID tokens and create or link local users without replacing the existing auth system."""
 
@@ -51,13 +55,18 @@ class GoogleOAuthService:
             'picture': payload.get('picture') or '',
         }
 
-    def authenticate(self, token: str) -> tuple[User, StudentProfile]:
+    def authenticate(self, token: str, intent: str = 'signup') -> tuple[User, StudentProfile, bool]:
         payload = self.verify_token(token)
         email = payload['email']
+        intent = (intent or 'signup').lower()
 
         with transaction.atomic():
             user = User.objects.filter(email__iexact=email).order_by('-id').first()
+            created = False
             if user is None:
+                if intent != 'signup':
+                    raise GoogleAccountNotEligibleError('No linked UniPeer account found for this Google account.')
+
                 username = self._build_username(email)
                 user = User.objects.create_user(
                     username=username,
@@ -66,6 +75,7 @@ class GoogleOAuthService:
                     first_name=payload.get('given_name', ''),
                     last_name=payload.get('family_name', ''),
                 )
+                created = True
             else:
                 user.first_name = payload.get('given_name', user.first_name or '')
                 user.last_name = payload.get('family_name', user.last_name or '')
@@ -77,7 +87,7 @@ class GoogleOAuthService:
                 profile.avatar_url = payload['picture']
             profile.save(update_fields=['email_verified', 'avatar_url'])
 
-        return user, profile
+        return user, profile, created
 
     def _build_username(self, email: str) -> str:
         base = email.split('@', 1)[0].replace('.', '').replace('_', '')

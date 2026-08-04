@@ -42,7 +42,7 @@ from .serializers import (
 from .ml_engine import StudentMatcher, ResourceRecommender
 from .throttles import NotificationAnonThrottle, NotificationBurstThrottle, NotificationUserThrottle
 from .permissions import IsAdminOrStaff
-from .services.google_auth import GoogleOAuthService
+from .services.google_auth import GoogleAccountNotEligibleError, GoogleOAuthService
 
 
 def _build_cookie_response(payload=None, status_code=status.HTTP_200_OK):
@@ -857,27 +857,27 @@ class GoogleAuthView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         token = serializer.validated_data['token']
+        intent = (request.query_params.get('intent') or 'signup').strip().lower()
+        if intent not in {'signup', 'login'}:
+            return Response({'error': 'Unsupported auth intent.'}, status=status.HTTP_400_BAD_REQUEST)
+
         service = GoogleOAuthService()
         try:
-            user, profile = service.authenticate(token)
+            user, profile, created = service.authenticate(token, intent=intent)
         except ValueError as exc:
             return Response({'error': str(exc)}, status=status.HTTP_401_UNAUTHORIZED)
+        except GoogleAccountNotEligibleError as exc:
+            return Response({'account_exists': False, 'error': str(exc)}, status=status.HTTP_403_FORBIDDEN)
         except Exception:
             return Response({'error': 'Unable to authenticate with Google.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         refresh = RefreshToken.for_user(user)
         _create_refresh_record(user, refresh)
         response_payload = {
-            'success': True,
-            'user': {
-                'id': user.id,
-                'username': user.username,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-                'email': user.email,
-                'profile': StudentProfileSerializer(profile, context={'request': request}).data,
-            },
-            'message': 'Authenticated successfully.',
+            'profile': StudentProfileSerializer(profile, context={'request': request}).data,
+            'account_exists': True,
+            'created': created,
+            'is_new_user': created,
         }
         response = Response(response_payload)
         _set_auth_cookies(response, str(refresh.access_token), str(refresh), access_ttl_seconds=15 * 60, refresh_ttl_seconds=60 * 60 * 24 * 7)
