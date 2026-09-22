@@ -35,7 +35,7 @@ Quickstart (local development)
 2. Install dependencies:
    pip install -r requirements.txt
 3. Copy the env template and adjust values:
-   cp .env .env.local
+   cp .env.example .env
 4. Run migrations and prepare static files:
    python manage.py migrate
    python manage.py collectstatic --no-input

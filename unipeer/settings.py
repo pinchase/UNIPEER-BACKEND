@@ -17,7 +17,7 @@ if env_file.exists():
     environ.Env.read_env(env_file)
 
 
-SECRET_KEY = env("SECRET_KEY")
+SECRET_KEY = env("SECRET_KEY", default="django-insecure-change-me")
 
 DEBUG = env.bool("DEBUG", default=False)
 GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", default="")
