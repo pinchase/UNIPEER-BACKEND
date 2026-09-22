@@ -60,8 +60,6 @@ class StudentProfile(models.Model):
     department = models.CharField(max_length=200, default='')
     year_of_study = models.IntegerField(default=1)
     gpa = models.FloatField(default=0.0)
-
-    # New privacy flag: when False, personal fields are hidden to other users
     show_personal_info = models.BooleanField(default=False, help_text='If True, allow other users to see personal info (name, email, avatar).')
 
     # Gamification

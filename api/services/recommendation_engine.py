@@ -7,6 +7,8 @@ from .feature_extractor import FeatureExtractor
 from .semantic_matcher import SemanticMatcher
 from .similarity import HybridScorer
 
+MIN_MATCH_SCORE = 0.30
+
 
 class EmbeddingProvider(Protocol):
     def encode(self, texts: list[str]) -> list[list[float]]:
@@ -29,6 +31,7 @@ class HybridRecommendationEngine:
         if not candidates:
             return []
 
+        threshold = max(min_score, MIN_MATCH_SCORE)
         ranked: list[tuple[float, Any, dict[str, float], str]] = []
         for candidate in candidates:
             if candidate.id == target_profile.id:
@@ -40,7 +43,7 @@ class HybridRecommendationEngine:
                 candidate.get_feature_text(),
             )
             score, features = self.scorer.score_student_match(target_profile, candidate, semantic_similarity)
-            if score < min_score:
+            if score <= threshold:
                 continue
             explanation = self.explainer.explain_student_match(target_profile, candidate, features)
             ranked.append((score, candidate, features, explanation))

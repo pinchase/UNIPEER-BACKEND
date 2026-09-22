@@ -40,6 +40,7 @@ from .serializers import (
     GoogleAuthSerializer
 )
 from .ml_engine import StudentMatcher, ResourceRecommender
+from .services.recommendation_engine import MIN_MATCH_SCORE
 from .throttles import NotificationAnonThrottle, NotificationBurstThrottle, NotificationUserThrottle
 from .permissions import IsAdminOrStaff
 from .services.google_auth import GoogleAccountNotEligibleError, GoogleOAuthService
@@ -488,6 +489,17 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
     serializer_class = StudentProfileSerializer
     permission_classes = [AllowAny]
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if self.action == 'list':
+            return queryset.filter(
+                department__gt='',
+                year_of_study__isnull=False,
+            ).filter(
+                models.Q(skills__isnull=False) | models.Q(courses__isnull=False),
+            ).distinct()
+        return queryset
+
     @action(detail=True, methods=['get'])
     def matches(self, request, pk=None):
         profile = self.get_object()
@@ -636,20 +648,34 @@ class MatchViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]
 
     def get_queryset(self):
+        queryset = Match.objects.filter(
+            similarity_score__gt=MIN_MATCH_SCORE,
+            student_a__department__gt='',
+            student_b__department__gt='',
+        ).filter(
+            models.Q(student_a__skills__isnull=False) | models.Q(student_a__courses__isnull=False),
+            models.Q(student_b__skills__isnull=False) | models.Q(student_b__courses__isnull=False),
+        ).distinct()
+
         # Filter matches where the student is either a or b
         profile_id = self.request.query_params.get('profile_id')
         if profile_id:
-            queryset = Match.objects.filter(
+            queryset = queryset.filter(
                 models.Q(student_a_id=profile_id) | models.Q(student_b_id=profile_id)
             )
             if not queryset.exists():
                 profile = get_object_or_404(StudentProfile, id=profile_id)
                 sync_suggested_matches_for_profile(profile, top_n=10)
                 queryset = Match.objects.filter(
-                    models.Q(student_a_id=profile_id) | models.Q(student_b_id=profile_id)
-                )
+                    models.Q(student_a_id=profile_id) | models.Q(student_b_id=profile_id),
+                    models.Q(student_a__skills__isnull=False) | models.Q(student_a__courses__isnull=False),
+                    models.Q(student_b__skills__isnull=False) | models.Q(student_b__courses__isnull=False),
+                    similarity_score__gt=MIN_MATCH_SCORE,
+                    student_a__department__gt='',
+                    student_b__department__gt='',
+                ).distinct()
             return queryset
-        return super().get_queryset()
+        return queryset
 
     def create(self, request, *args, **kwargs):
         student_a_id = request.data.get('student_a')
@@ -674,6 +700,23 @@ class MatchViewSet(viewsets.ModelViewSet):
         
         student_a = get_object_or_404(StudentProfile, id=id_a)
         student_b = get_object_or_404(StudentProfile, id=id_b)
+
+        if not student_a.is_academic_complete() or not student_b.is_academic_complete():
+            return Response(
+                {'error': 'Both profiles must be complete before creating a match'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            similarity_score = float(similarity_score)
+        except (TypeError, ValueError):
+            return Response({'error': 'similarity_score must be a number'}, status=400)
+
+        if similarity_score <= MIN_MATCH_SCORE:
+            return Response(
+                {'error': f'Match score must be greater than {MIN_MATCH_SCORE:.0%}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         match, created = Match.objects.get_or_create(
             student_a=student_a,
